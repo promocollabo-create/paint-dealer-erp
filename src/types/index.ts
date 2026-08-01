@@ -255,3 +255,32 @@ export interface PriceListVersion {
 export interface PriceListItem extends ParsedPriceRow {
   id: string;
 }
+
+/* ------------------------------ Phase 4: Product Types & Paint Accessories ------------------------------ */
+
+/** Top-level split of the catalog. Paint keeps the existing Brand → Series → Product →
+ *  Packing structure (the `Product` type above). Accessories use a simpler, user-defined
+ *  Section → Type/Size structure with no Brand/Series and no stored GST. */
+export type ProductType = "paint" | "accessory";
+
+/** One Type/Size variant within an Accessory Section, e.g. { name: "4 Inch", retailPrice: 450 }.
+ *  Unlike Paint packaging options, accessory variants carry no GST — GST for accessories is
+ *  entered manually per invoice line, defaulting to 0%. */
+export interface AccessoryVariant {
+  id: string;
+  name: string;
+  retailPrice: number;
+}
+
+/** A user-defined Accessory Section (e.g. Brush, Roller, Patra, Sandpaper, Tape). Section
+ *  names and their Type/Size variant names are entirely free text chosen by the user —
+ *  nothing here is hard-coded. */
+export interface AccessorySection {
+  id: string;
+  sectionName: string;
+  variants: AccessoryVariant[];
+  status: ProductStatus;
+  searchTokens: string[];
+  createdAt: number;
+  updatedAt: number;
+}

@@ -4,9 +4,14 @@ import { useState } from "react";
 import { addDoc, collection, doc, getDocs, limit as fsLimit, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
 import { Loader2, Plus, Trash2, X } from "lucide-react";
 import { db } from "@/lib/firebase";
-import { PRODUCT_CATEGORIES, Product } from "@/types";
+import { Product } from "@/types";
 import { generateSearchTokens } from "@/lib/search";
 import toast from "react-hot-toast";
+
+/** Paint products no longer expose a Category picker in the UI — every Paint product added
+ *  through this form is stored under the fixed "Paint" category so it stays separate from
+ *  Paint Accessories (which live in their own `accessorySections` collection entirely). */
+const PAINT_CATEGORY = "Paint";
 
 interface PackagingRow {
   id: string;
@@ -27,7 +32,7 @@ function emptyPackagingRow(): PackagingRow {
 
 const EMPTY_FORM = {
   company: "",
-  category: PRODUCT_CATEGORIES[0] as string,
+  category: PAINT_CATEGORY,
   series: "",
   productName: "",
   status: "active" as "active" | "inactive"
@@ -155,28 +160,16 @@ export default function ProductFormModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/50 p-4">
       <div className="card max-h-[90vh] w-full max-w-2xl overflow-y-auto">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-display text-base font-semibold">{editing ? "Edit Product" : "Add Product"}</h2>
+          <h2 className="font-display text-base font-semibold">{editing ? "Edit Paint Product" : "Add Paint Product"}</h2>
           <button onClick={onClose} className="text-ink-400 hover:text-ink-600 dark:hover:text-ink-200">
             <X className="h-5 w-5" />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="label">Company</label>
-              <input className="input" value={form.company} onChange={(e) => set("company", e.target.value)} placeholder="e.g. Allied Paint Industries" />
-            </div>
-            <div>
-              <label className="label">Category</label>
-              <select className="input" value={form.category} onChange={(e) => set("category", e.target.value)}>
-                {PRODUCT_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <div>
+            <label className="label">Brand</label>
+            <input className="input" value={form.company} onChange={(e) => set("company", e.target.value)} placeholder="e.g. Allied Paint Industries" />
           </div>
 
           <div>

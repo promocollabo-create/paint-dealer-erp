@@ -7,12 +7,13 @@ import { Loader2, Plus, Trash2, X } from "lucide-react";
 import { db } from "@/lib/firebase";
 import Topbar from "@/components/layout/Topbar";
 import ProductSearchDropdown from "@/components/products/ProductSearchDropdown";
+import AccessorySearchDropdown from "@/components/products/AccessorySearchDropdown";
 import CustomerSearchDropdown from "@/components/customers/CustomerSearchDropdown";
 import { useAuth } from "@/context/AuthContext";
 import { getShopSettings } from "@/lib/shopSettings";
 import { createInvoiceWithLedger } from "@/lib/ledger";
 import { calculateInvoiceItem, calculateInvoiceTotals } from "@/lib/invoiceCalc";
-import { Customer, InvoiceLineItem, Product } from "@/types";
+import { AccessorySection, Customer, InvoiceLineItem, Product } from "@/types";
 import toast from "react-hot-toast";
 
 function money(n: number, currency = "PKR") {
@@ -39,11 +40,41 @@ function computeLine(line: DraftLine): DraftLine {
   return { ...line, discountAmount, gstAmount, lineTotal };
 }
 
+/** Top-level product picker for a new invoice line. Paint and Paint Accessories are picked
+ *  differently (Paint carries stored GST per packing; Accessories never store GST — it's
+ *  entered manually per line, defaulting to 0%) so the user first chooses which type of item
+ *  they're adding, then gets the matching search-and-pick flow below. */
+function ProductPickerPanel({ onAdd }: { onAdd: (line: DraftLine) => void }) {
+  const [itemType, setItemType] = useState<"paint" | "accessory">("paint");
+
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-2">
+        {(["paint", "accessory"] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setItemType(t)}
+            className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition ${
+              itemType === t
+                ? "border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-200"
+                : "border-ink-200 text-ink-500 dark:border-ink-700 dark:text-ink-400"
+            }`}
+          >
+            {t === "paint" ? "Paint" : "Paint Accessories"}
+          </button>
+        ))}
+      </div>
+      {itemType === "paint" ? <PaintPickerPanel onAdd={onAdd} /> : <AccessoryPickerPanel onAdd={onAdd} />}
+    </div>
+  );
+}
+
 /** Product selection follows Series → Product Name → Packaging. Once a product is picked from
  *  search, this panel lets the user choose which packaging (size) to invoice — selecting a
  *  packaging automatically loads that variant's Retail Price and GST %, per the Allied Paint
  *  price list structure (Company → Category → Series → Product Name → Packaging). */
-function ProductPickerPanel({ onAdd }: { onAdd: (line: DraftLine) => void }) {
+function PaintPickerPanel({ onAdd }: { onAdd: (line: DraftLine) => void }) {
   const [pendingProduct, setPendingProduct] = useState<Product | null>(null);
   const [packagingId, setPackagingId] = useState<string>("");
   const [quantity, setQuantity] = useState("1");
@@ -125,6 +156,113 @@ function ProductPickerPanel({ onAdd }: { onAdd: (line: DraftLine) => void }) {
             <div>
               <label className="label">GST %</label>
               <div className="input flex items-center bg-white dark:bg-ink-900">{selectedOption ? `${selectedOption.gst}%` : "—"}</div>
+            </div>
+            <div>
+              <label className="label">Quantity</label>
+              <input type="number" min="0.01" step="0.01" className="input" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div>
+              <label className="label">Discount %</label>
+              <input type="number" min="0" max="100" step="0.01" className="input" value={discountPercent} onChange={(e) => setDiscountPercent(e.target.value)} />
+            </div>
+          </div>
+
+          <button type="button" onClick={handleAdd} className="btn-primary">
+            <Plus className="h-4 w-4" /> Add to Invoice
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Accessory selection follows Section → Type/Size. Unlike Paint, accessories never carry a
+ *  stored GST — the invoice line defaults to 0% GST but stays manually editable, per the
+ *  Paint Accessories spec (Section 6). */
+function AccessoryPickerPanel({ onAdd }: { onAdd: (line: DraftLine) => void }) {
+  const [pendingSection, setPendingSection] = useState<AccessorySection | null>(null);
+  const [variantId, setVariantId] = useState<string>("");
+  const [quantity, setQuantity] = useState("1");
+  const [discountPercent, setDiscountPercent] = useState("0");
+  const [gstPercent, setGstPercent] = useState("0");
+
+  const selectedVariant = pendingSection?.variants.find((v) => v.id === variantId) ?? null;
+
+  function selectSection(s: AccessorySection) {
+    setPendingSection(s);
+    setVariantId(s.variants[0]?.id ?? "");
+    setQuantity("1");
+    setDiscountPercent("0");
+    setGstPercent("0");
+  }
+
+  function handleAdd() {
+    if (!pendingSection || !selectedVariant) {
+      toast.error("Select a Type/Size first.");
+      return;
+    }
+    const qty = Number(quantity) || 0;
+    if (qty <= 0) {
+      toast.error("Quantity must be greater than 0.");
+      return;
+    }
+    const line = computeLine({
+      rowId: newRowId(),
+      productId: `${pendingSection.id}:${selectedVariant.id}`,
+      productName: pendingSection.sectionName,
+      company: "",
+      category: "Paint Accessories",
+      series: "",
+      packing: selectedVariant.name,
+      quantity: qty,
+      unitPrice: selectedVariant.retailPrice,
+      discountPercent: Number(discountPercent) || 0,
+      discountAmount: 0,
+      gstPercent: Number(gstPercent) || 0,
+      gstAmount: 0,
+      lineTotal: 0
+    });
+    onAdd(line);
+    setPendingSection(null);
+    setVariantId("");
+  }
+
+  return (
+    <div className="space-y-3">
+      <AccessorySearchDropdown activeOnly onSelect={selectSection} />
+
+      {pendingSection && (
+        <div className="space-y-3 rounded-lg border border-ink-100 bg-ink-50 p-4 dark:border-ink-800 dark:bg-ink-800">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="font-medium">Section: {pendingSection.sectionName}</p>
+            </div>
+            <button type="button" onClick={() => setPendingSection(null)} className="text-ink-400 hover:text-ink-600 dark:hover:text-ink-200">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div>
+              <label className="label">Type / Size</label>
+              <select className="input" value={variantId} onChange={(e) => setVariantId(e.target.value)}>
+                {pendingSection.variants.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label">Retail Price</label>
+              <div className="input flex items-center bg-white dark:bg-ink-900">{selectedVariant ? money(selectedVariant.retailPrice) : "—"}</div>
+            </div>
+            <div>
+              <label className="label">GST % (manual)</label>
+              <input type="number" min="0" max="100" step="0.01" className="input" value={gstPercent} onChange={(e) => setGstPercent(e.target.value)} />
             </div>
             <div>
               <label className="label">Quantity</label>

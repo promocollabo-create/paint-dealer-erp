@@ -63,6 +63,13 @@ service cloud.firestore {
       allow create, update, delete: if isManagerUp();
     }
 
+    // Accessory sections: same access pattern as Products — admin + manager manage the
+    // catalog, staff can only read (needed for invoice line-item lookup).
+    match /accessorySections/{sectionId} {
+      allow read: if isStaffUp();
+      allow create, update, delete: if isManagerUp();
+    }
+
     // Price list versions + their immutable item snapshots: write on upload/commit only
     // (no update/delete — a committed version must never change, so old invoices that
     // reference a versionId always resolve to the original prices). Staff can read so a
