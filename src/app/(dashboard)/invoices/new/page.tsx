@@ -11,6 +11,7 @@ import CustomerSearchDropdown from "@/components/customers/CustomerSearchDropdow
 import { useAuth } from "@/context/AuthContext";
 import { getShopSettings } from "@/lib/shopSettings";
 import { createInvoiceWithLedger } from "@/lib/ledger";
+import { calculateInvoiceItem, calculateInvoiceTotals } from "@/lib/invoiceCalc";
 import { Customer, InvoiceLineItem, Product } from "@/types";
 import toast from "react-hot-toast";
 
@@ -29,11 +30,12 @@ interface DraftLine extends InvoiceLineItem {
 }
 
 function computeLine(line: DraftLine): DraftLine {
-  const gross = line.quantity * line.unitPrice;
-  const discountAmount = (gross * line.discountPercent) / 100;
-  const taxable = gross - discountAmount;
-  const gstAmount = (taxable * line.gstPercent) / 100;
-  const lineTotal = taxable + gstAmount;
+  const { discountAmount, gstAmount, lineTotal } = calculateInvoiceItem({
+    quantity: line.quantity,
+    unitPrice: line.unitPrice,
+    discountPercent: line.discountPercent,
+    gstPercent: line.gstPercent
+  });
   return { ...line, discountAmount, gstAmount, lineTotal };
 }
 
@@ -145,13 +147,14 @@ function NewInvoiceForm() {
   }
 
   const totals = useMemo(() => {
-    const subtotal = lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0);
-    const discountTotal = lines.reduce((s, l) => s + l.discountAmount, 0);
-    const gstTotal = lines.reduce((s, l) => s + l.gstAmount, 0);
-    const beforeWht = subtotal - discountTotal + gstTotal;
-    const whtAmount = whtEnabled ? (beforeWht * whtPercent) / 100 : 0;
-    const grandTotal = beforeWht - whtAmount;
-    return { subtotal, discountTotal, gstTotal, whtAmount, grandTotal };
+    return calculateInvoiceTotals(
+      lines.map((l) => ({
+        gross: l.quantity * l.unitPrice,
+        discountAmount: l.discountAmount,
+        gstAmount: l.gstAmount
+      })),
+      { enabled: whtEnabled, percent: whtPercent }
+    );
   }, [lines, whtEnabled, whtPercent]);
 
   async function handleGenerate() {
