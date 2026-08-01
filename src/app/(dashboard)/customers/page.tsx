@@ -1,22 +1,28 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
-  getCountFromServer,
+  getDocs,
+  limit as fsLimit,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
-  updateDoc
+  updateDoc,
+  where
 } from "firebase/firestore";
-import { Loader2, Plus, Search, X } from "lucide-react";
+import { Loader2, Plus, Search, Trash2, X } from "lucide-react";
 import { db } from "@/lib/firebase";
 import Topbar from "@/components/layout/Topbar";
 import ProtectedRoute from "@/components/ProtectedRoute";
-import { Customer } from "@/types";
+import { useAuth } from "@/context/AuthContext";
+import { hasPermission, Customer } from "@/types";
+import { formatSequence, nextSequence } from "@/lib/numbering";
 import toast from "react-hot-toast";
 
 const EMPTY_FORM = { name: "", phone: "", address: "", city: "", creditLimit: "0", notes: "" };
@@ -50,6 +56,7 @@ function CustomerModal({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (saving) return; // guard against a double-click firing two submits (was creating duplicate customers)
     setSaving(true);
     try {
       const payload = {
@@ -61,12 +68,29 @@ function CustomerModal({
         notes: form.notes.trim()
       };
 
+      if (!payload.name || !payload.phone) {
+        toast.error("Name and phone are required.");
+        setSaving(false);
+        return;
+      }
+
+      // Duplicate check by phone number (excluding the record being edited).
+      const dupeSnap = await getDocs(query(collection(db, "customers"), where("phone", "==", payload.phone), fsLimit(2)));
+      const dupeExists = dupeSnap.docs.some((d) => d.id !== editing?.id);
+      if (dupeExists) {
+        toast.error("A customer with this phone number already exists.");
+        setSaving(false);
+        return;
+      }
+
       if (editing) {
         await updateDoc(doc(db, "customers", editing.id), { ...payload, updatedAt: serverTimestamp() });
         toast.success("Customer updated");
       } else {
-        const countSnap = await getCountFromServer(collection(db, "customers"));
-        const customerCode = `CUST-${String(countSnap.data().count + 1).padStart(4, "0")}`;
+        // Atomic counter (transaction) instead of getCountFromServer()+1, which two
+        // simultaneous submits could both read as the same number and create duplicate codes.
+        const seq = await nextSequence("customers");
+        const customerCode = formatSequence("CUST-", seq);
         await addDoc(collection(db, "customers"), {
           ...payload,
           customerCode,
@@ -80,7 +104,7 @@ function CustomerModal({
       onClose();
     } catch (err) {
       console.error(err);
-      toast.error("Could not save customer.");
+      toast.error("Could not save customer. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -166,11 +190,31 @@ function CustomerModal({
 }
 
 function CustomersContent() {
+  const { appUser } = useAuth();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Customer | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function handleDelete(c: Customer) {
+    if (c.outstanding > 0) {
+      toast.error("Can't delete a customer with an outstanding balance.");
+      return;
+    }
+    if (!window.confirm(`Delete customer "${c.name}"? This cannot be undone.`)) return;
+    setDeletingId(c.id);
+    try {
+      await deleteDoc(doc(db, "customers", c.id));
+      toast.success("Customer deleted");
+    } catch (err) {
+      console.error(err);
+      toast.error("Could not delete customer.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   useEffect(() => {
     const q = query(collection(db, "customers"), orderBy("createdAt", "desc"));
@@ -278,15 +322,30 @@ function CustomersContent() {
                     {money(c.outstanding)}
                   </td>
                   <td className="px-5 py-3 text-right">
-                    <button
-                      onClick={() => {
-                        setEditing(c);
-                        setModalOpen(true);
-                      }}
-                      className="text-xs font-medium text-brand-600 hover:underline"
-                    >
-                      Edit
-                    </button>
+                    <div className="flex items-center justify-end gap-3">
+                      <Link href={`/customers/${c.id}/ledger`} className="text-xs font-medium text-brand-600 hover:underline">
+                        Ledger
+                      </Link>
+                      <button
+                        onClick={() => {
+                          setEditing(c);
+                          setModalOpen(true);
+                        }}
+                        className="text-xs font-medium text-brand-600 hover:underline"
+                      >
+                        Edit
+                      </button>
+                      {hasPermission(appUser?.role, "customers.manage") && (
+                        <button
+                          onClick={() => handleDelete(c)}
+                          disabled={deletingId === c.id}
+                          className="text-ink-400 hover:text-swatch-clay disabled:opacity-50"
+                          aria-label="Delete customer"
+                        >
+                          {deletingId === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Users, Settings, PaintBucket, KeyRound, PackageSearch } from "lucide-react";
+import { LayoutDashboard, Users, Settings, PaintBucket, KeyRound, PackageSearch, FileText, Wallet } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { hasPermission } from "@/types";
 
@@ -12,6 +12,8 @@ const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, permission: "dashboard.view" },
   { href: "/products", label: "Products", icon: PackageSearch, permission: "products.manage" },
   { href: "/customers", label: "Customers", icon: Users, permission: "customers.manage" },
+  { href: "/invoices", label: "Invoices", icon: FileText, permission: "invoices.create" },
+  { href: "/payments", label: "Payments", icon: Wallet, permission: "payments.receive" },
   { href: "/settings", label: "Shop Settings", icon: Settings, permission: "settings.manage" }
 ];
 

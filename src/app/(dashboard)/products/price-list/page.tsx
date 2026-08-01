@@ -131,25 +131,55 @@ function UploadFlow({ onCommitted }: { onCommitted: () => void }) {
   const [parsing, setParsing] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [summary, setSummary] = useState<{ created: number; updated: number; skipped: number; failed: number } | null>(
+    null
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const ACCEPTED_EXTENSIONS = [".xlsx", ".xls", ".csv", ".pdf"];
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    const lowerName = file.name.toLowerCase();
+    const ext = ACCEPTED_EXTENSIONS.find((x) => lowerName.endsWith(x));
+    if (!ext) {
+      toast.error("Unsupported file type. Please upload a .xlsx, .xls, .csv, or .pdf file.");
+      e.target.value = "";
+      return;
+    }
+    if (file.size === 0) {
+      toast.error("That file is empty.");
+      e.target.value = "";
+      return;
+    }
+    if (file.size > 15 * 1024 * 1024) {
+      toast.error("File is too large (max 15MB).");
+      e.target.value = "";
+      return;
+    }
+
     setRows(null);
     setSheet(null);
+    setSummary(null);
     setParsing(true);
     setFileName(file.name);
-    const isPdf = file.name.toLowerCase().endsWith(".pdf");
+    const isPdf = ext === ".pdf";
     setFileType(isPdf ? "pdf" : "excel");
 
     try {
       const parsed = isPdf ? await parsePdfFile(file) : await parseExcelFile(file);
+      if (!parsed.headers.length || !parsed.rows.length) {
+        toast.error("No readable rows were found in that file. Check the format and try again.");
+        setParsing(false);
+        return;
+      }
       setSheet(parsed);
       setMapping(autoMapColumns(parsed.headers));
     } catch (err: any) {
       console.error(err);
-      toast.error(err?.message || "Couldn't read that file.");
+      toast.error(err?.message || "Couldn't read that file. Please check the format and try again.");
     } finally {
       setParsing(false);
     }
@@ -193,12 +223,34 @@ function UploadFlow({ onCommitted }: { onCommitted: () => void }) {
       return;
     }
 
+    // Rows that are blank/duplicated within the same file are skipped up front rather than
+    // written twice — importing a file with the same product code twice used to create two
+    // separate product documents for it.
+    const seenCodes = new Set<string>();
+    const dedupedRows: ParsedPriceRow[] = [];
+    let skippedDuplicatesInFile = 0;
+    for (const row of rows) {
+      const code = row.productCode.trim().toLowerCase();
+      if (seenCodes.has(code)) {
+        skippedDuplicatesInFile++;
+        continue;
+      }
+      seenCodes.add(code);
+      dedupedRows.push(row);
+    }
+
     setCommitting(true);
-    setProgress({ done: 0, total: rows.length });
+    setSummary(null);
+    setProgress({ done: 0, total: dedupedRows.length });
+
+    let created = 0;
+    let updated = 0;
+    let failed = 0;
+    const versionRef = doc(collection(db, "priceListVersions"));
+
     try {
       const versionCountSnap = await getCountFromServer(collection(db, "priceListVersions"));
       const versionNumber = versionCountSnap.data().count + 1;
-      const versionRef = doc(collection(db, "priceListVersions"));
 
       await writeBatch(db)
         .set(versionRef, {
@@ -208,14 +260,14 @@ function UploadFlow({ onCommitted }: { onCommitted: () => void }) {
           effectiveDate: new Date(effectiveDate),
           uploadedBy: appUser?.name ?? appUser?.email ?? "unknown",
           uploadedAt: serverTimestamp(),
-          itemCount: rows.length,
+          itemCount: dedupedRows.length,
           notes: ""
         })
         .commit();
 
       // 1) Write the immutable snapshot rows in batches of 400 (Firestore batch limit is 500 writes).
-      for (let i = 0; i < rows.length; i += 400) {
-        const chunk = rows.slice(i, i + 400);
+      for (let i = 0; i < dedupedRows.length; i += 400) {
+        const chunk = dedupedRows.slice(i, i + 400);
         const batch = writeBatch(db);
         for (const row of chunk) {
           const itemRef = doc(collection(db, "priceListVersions", versionRef.id, "items"));
@@ -224,57 +276,89 @@ function UploadFlow({ onCommitted }: { onCommitted: () => void }) {
         await batch.commit();
       }
 
-      // 2) Upsert the live product catalog by productCode, one lookup per row.
+      // 2) Upsert the live product catalog by productCode. Each row is handled independently
+      //    so one bad row can't fail the entire import — it's just counted under "failed".
       let done = 0;
-      for (let i = 0; i < rows.length; i += 25) {
-        const chunk = rows.slice(i, i + 25);
+      for (let i = 0; i < dedupedRows.length; i += 25) {
+        const chunk = dedupedRows.slice(i, i + 25);
         const batch = writeBatch(db);
+        const chunkResults: ("created" | "updated" | "failed")[] = [];
+
         for (const row of chunk) {
-          const existing = await getDocs(
-            query(collection(db, "products"), where("productCode", "==", row.productCode), fsLimit(1))
-          );
-          const searchTokens = generateSearchTokens({
-            productName: row.productName,
-            productCode: row.productCode,
-            category: row.category,
-            series: row.series,
-            company: row.company
-          });
-          const priceFields = {
-            company: row.company,
-            category: row.category || "Other Accessories",
-            series: row.series,
-            productName: row.productName,
-            productCode: row.productCode,
-            packing: row.packing,
-            retailPrice: row.retailPrice,
-            gst: row.gst,
-            mrp: row.mrp,
-            currentPriceListVersionId: versionRef.id,
-            searchTokens,
-            updatedAt: serverTimestamp()
-          };
-          if (!existing.empty) {
-            batch.update(existing.docs[0].ref, priceFields);
-          } else {
-            const newRef = doc(collection(db, "products"));
-            batch.set(newRef, {
-              ...priceFields,
-              colorName: "",
-              shadeCode: "",
-              unit: "",
-              status: "active",
-              source: "priceList",
-              createdAt: serverTimestamp()
+          try {
+            const existing = await getDocs(
+              query(collection(db, "products"), where("productCode", "==", row.productCode), fsLimit(1))
+            );
+            const searchTokens = generateSearchTokens({
+              productName: row.productName,
+              productCode: row.productCode,
+              category: row.category,
+              series: row.series,
+              company: row.company
             });
+            const priceFields = {
+              company: row.company,
+              category: row.category || "Other Accessories",
+              series: row.series,
+              productName: row.productName,
+              productCode: row.productCode,
+              packing: row.packing,
+              retailPrice: row.retailPrice,
+              gst: row.gst,
+              mrp: row.mrp,
+              currentPriceListVersionId: versionRef.id,
+              searchTokens,
+              updatedAt: serverTimestamp()
+            };
+            if (!existing.empty) {
+              batch.update(existing.docs[0].ref, priceFields);
+              chunkResults.push("updated");
+            } else {
+              const newRef = doc(collection(db, "products"));
+              batch.set(newRef, {
+                ...priceFields,
+                colorName: "",
+                shadeCode: "",
+                unit: "",
+                status: "active",
+                source: "priceList",
+                createdAt: serverTimestamp()
+              });
+              chunkResults.push("created");
+            }
+          } catch (rowErr) {
+            console.error("Row failed:", row.productCode, rowErr);
+            chunkResults.push("failed");
           }
-          done++;
         }
-        await batch.commit();
-        setProgress({ done, total: rows.length });
+
+        try {
+          await batch.commit();
+          chunkResults.forEach((r) => {
+            if (r === "created") created++;
+            else if (r === "updated") updated++;
+            else failed++;
+          });
+        } catch (batchErr) {
+          console.error("Batch commit failed:", batchErr);
+          failed += chunkResults.length;
+        }
+
+        done += chunk.length;
+        setProgress({ done, total: dedupedRows.length });
       }
 
-      toast.success(`Price list version ${versionNumber} committed — ${rows.length} products updated.`);
+      setSummary({ created, updated, skipped: skippedDuplicatesInFile, failed });
+
+      if (failed > 0) {
+        toast.error(`Imported with ${failed} failure(s). See summary below.`);
+      } else {
+        toast.success(
+          `Price list version ${versionNumber} committed — ${created} added, ${updated} updated${
+            skippedDuplicatesInFile ? `, ${skippedDuplicatesInFile} duplicate rows skipped` : ""
+          }.`
+        );
+      }
       setSheet(null);
       setRows(null);
       setFileName("");
@@ -282,7 +366,7 @@ function UploadFlow({ onCommitted }: { onCommitted: () => void }) {
       onCommitted();
     } catch (err) {
       console.error(err);
-      toast.error("Something went wrong while committing the price list.");
+      toast.error("Something went wrong while committing the price list. No products were changed for unprocessed rows.");
     } finally {
       setCommitting(false);
       setProgress(null);
@@ -297,6 +381,27 @@ function UploadFlow({ onCommitted }: { onCommitted: () => void }) {
         Product, Product Code, Packing, Retail Price, GST, and MRP — you can correct anything
         before it's saved.
       </p>
+
+      {summary && (
+        <div className="mb-4 grid grid-cols-2 gap-3 rounded-lg border border-ink-100 bg-ink-50 p-4 text-sm sm:grid-cols-4 dark:border-ink-800 dark:bg-ink-800">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-ink-400">Added</p>
+            <p className="font-display text-lg font-semibold text-swatch-moss">{summary.created}</p>
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-wide text-ink-400">Updated</p>
+            <p className="font-display text-lg font-semibold text-swatch-teal">{summary.updated}</p>
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-wide text-ink-400">Skipped (dupes)</p>
+            <p className="font-display text-lg font-semibold text-swatch-ochre">{summary.skipped}</p>
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-wide text-ink-400">Failed</p>
+            <p className="font-display text-lg font-semibold text-swatch-clay">{summary.failed}</p>
+          </div>
+        </div>
+      )}
 
       {!sheet && (
         <label className="flex cursor-pointer flex-col items-center gap-2 rounded-xl2 border-2 border-dashed border-ink-200 py-10 text-center hover:border-brand-400 dark:border-ink-700">

@@ -52,6 +52,93 @@ export interface PaymentSummary {
   createdAt: number;
 }
 
+/* ------------------------------ Phase 3: Invoices, Payments, Ledger ------------------------------ */
+
+export const PAYMENT_METHODS = ["cash", "bank", "jazzcash", "easypaisa", "cheque"] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  cash: "Cash",
+  bank: "Bank Transfer",
+  jazzcash: "JazzCash",
+  easypaisa: "EasyPaisa",
+  cheque: "Cheque"
+};
+
+export interface InvoiceLineItem {
+  productId: string;
+  productName: string;
+  productCode: string;
+  series: string;
+  packing: string;
+  colorName: string;
+  shadeCode: string;
+  unit: string;
+  quantity: number;
+  unitPrice: number;
+  discountPercent: number;
+  discountAmount: number;
+  gstPercent: number;
+  gstAmount: number;
+  lineTotal: number;
+}
+
+export type InvoiceStatus = "paid" | "partial" | "unpaid" | "cancelled";
+
+export interface Invoice {
+  id: string;
+  invoiceNumber: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string;
+  items: InvoiceLineItem[];
+  subtotal: number;
+  discountTotal: number;
+  gstTotal: number;
+  whtPercent: number;
+  whtAmount: number;
+  grandTotal: number;
+  amountPaid: number;
+  balanceDue: number;
+  status: InvoiceStatus;
+  notes: string;
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface Payment {
+  id: string;
+  receiptNumber: string;
+  customerId: string;
+  customerName: string;
+  invoiceId: string | null;
+  invoiceNumber: string | null;
+  amount: number;
+  previousBalance: number;
+  remainingBalance: number;
+  method: PaymentMethod;
+  referenceNumber: string;
+  notes: string;
+  createdBy: string;
+  createdAt: number;
+}
+
+export type LedgerEntryType = "invoice" | "payment" | "adjustment";
+
+export interface LedgerEntry {
+  id: string;
+  customerId: string;
+  type: LedgerEntryType;
+  refId: string;
+  refNumber: string;
+  description: string;
+  debit: number;
+  credit: number;
+  balance: number;
+  createdAt: number;
+}
+
 /** Permission matrix — the single source of truth for role-gated UI and routes. */
 export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
   admin: [

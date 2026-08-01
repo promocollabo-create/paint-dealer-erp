@@ -11,7 +11,7 @@ import {
   getCountFromServer,
   Timestamp
 } from "firebase/firestore";
-import { CircleDollarSign, CalendarClock, AlertTriangle, Users2 } from "lucide-react";
+import { CircleDollarSign, CalendarClock, AlertTriangle, Users2, PackageSearch } from "lucide-react";
 import { db } from "@/lib/firebase";
 import Topbar from "@/components/layout/Topbar";
 import StatCard from "@/components/ui/StatCard";
@@ -40,6 +40,7 @@ export default function DashboardPage() {
   const [monthlySales, setMonthlySales] = useState(0);
   const [outstanding, setOutstanding] = useState(0);
   const [customerCount, setCustomerCount] = useState(0);
+  const [productCount, setProductCount] = useState(0);
   const [recentInvoices, setRecentInvoices] = useState<InvoiceSummary[]>([]);
   const [recentPayments, setRecentPayments] = useState<PaymentSummary[]>([]);
   const [dataError, setDataError] = useState(false);
@@ -53,8 +54,9 @@ export default function DashboardPage() {
         const invoicesCol = collection(db, "invoices");
         const paymentsCol = collection(db, "payments");
         const customersCol = collection(db, "customers");
+        const productsCol = collection(db, "products");
 
-        const [todaySnap, monthSnap, customerCountSnap, recentInvSnap, recentPaySnap, outstandingSnap] =
+        const [todaySnap, monthSnap, customerCountSnap, productCountSnap, recentInvSnap, recentPaySnap, outstandingSnap] =
           await Promise.all([
             getDocs(
               query(invoicesCol, where("createdAt", ">=", Timestamp.fromDate(startOfToday())))
@@ -63,6 +65,7 @@ export default function DashboardPage() {
               query(invoicesCol, where("createdAt", ">=", Timestamp.fromDate(startOfMonth())))
             ),
             getCountFromServer(customersCol),
+            getCountFromServer(productsCol),
             getDocs(query(invoicesCol, orderBy("createdAt", "desc"), limit(5))),
             getDocs(query(paymentsCol, orderBy("createdAt", "desc"), limit(5))),
             getDocs(query(customersCol, where("outstanding", ">", 0)))
@@ -70,9 +73,12 @@ export default function DashboardPage() {
 
         if (cancelled) return;
 
-        setTodaySales(todaySnap.docs.reduce((sum, d) => sum + (d.data().total ?? 0), 0));
-        setMonthlySales(monthSnap.docs.reduce((sum, d) => sum + (d.data().total ?? 0), 0));
+        // total is the invoice's grandTotal (Phase 3 field). Fall back to the legacy `total`
+        // field so figures still populate correctly against invoices written before this field existed.
+        setTodaySales(todaySnap.docs.reduce((sum, d) => sum + (d.data().grandTotal ?? d.data().total ?? 0), 0));
+        setMonthlySales(monthSnap.docs.reduce((sum, d) => sum + (d.data().grandTotal ?? d.data().total ?? 0), 0));
         setCustomerCount(customerCountSnap.data().count);
+        setProductCount(productCountSnap.data().count);
         setOutstanding(outstandingSnap.docs.reduce((sum, d) => sum + (d.data().outstanding ?? 0), 0));
 
         setRecentInvoices(
@@ -82,7 +88,7 @@ export default function DashboardPage() {
               id: d.id,
               invoiceNumber: data.invoiceNumber ?? "—",
               customerName: data.customerName ?? "Walk-in",
-              total: data.total ?? 0,
+              total: data.grandTotal ?? data.total ?? 0,
               status: data.status ?? "unpaid",
               createdAt: data.createdAt?.toMillis?.() ?? Date.now()
             };
@@ -125,11 +131,12 @@ export default function DashboardPage() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <StatCard label="Today's Sales" value={loading ? "…" : money(todaySales)} icon={CircleDollarSign} accent="#2E7D8C" />
           <StatCard label="Monthly Sales" value={loading ? "…" : money(monthlySales)} icon={CalendarClock} accent="#3F4ED8" />
           <StatCard label="Outstanding Amount" value={loading ? "…" : money(outstanding)} icon={AlertTriangle} accent="#C1552E" />
           <StatCard label="Total Customers" value={loading ? "…" : String(customerCount)} icon={Users2} accent="#4C7B5A" />
+          <StatCard label="Total Products" value={loading ? "…" : String(productCount)} icon={PackageSearch} accent="#D9A441" />
         </div>
 
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">

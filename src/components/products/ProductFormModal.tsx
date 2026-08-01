@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { addDoc, collection, doc, serverTimestamp, updateDoc } from "firebase/firestore";
+import { addDoc, collection, doc, getDocs, limit as fsLimit, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
 import { Loader2, X } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { PRODUCT_CATEGORIES, PRODUCT_UNITS, Product } from "@/types";
@@ -60,6 +60,7 @@ export default function ProductFormModal({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (saving) return; // guard against a double-click firing two submits (was creating duplicate products)
     setSaving(true);
     try {
       const payload = {
@@ -85,6 +86,23 @@ export default function ProductFormModal({
         })
       };
 
+      if (!payload.productName || !payload.productCode) {
+        toast.error("Product name and code are required.");
+        setSaving(false);
+        return;
+      }
+
+      // Duplicate check by product code (excluding the record being edited).
+      const dupeSnap = await getDocs(
+        query(collection(db, "products"), where("productCode", "==", payload.productCode), fsLimit(2))
+      );
+      const dupeExists = dupeSnap.docs.some((d) => d.id !== editing?.id);
+      if (dupeExists) {
+        toast.error(`Product code "${payload.productCode}" is already in use.`);
+        setSaving(false);
+        return;
+      }
+
       if (editing) {
         await updateDoc(doc(db, "products", editing.id), { ...payload, updatedAt: serverTimestamp() });
         toast.success("Product updated");
@@ -102,7 +120,7 @@ export default function ProductFormModal({
       onClose();
     } catch (err) {
       console.error(err);
-      toast.error("Could not save product.");
+      toast.error("Could not save product. Please try again.");
     } finally {
       setSaving(false);
     }

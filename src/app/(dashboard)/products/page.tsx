@@ -2,13 +2,16 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Loader2, Plus, History } from "lucide-react";
+import { deleteDoc, doc } from "firebase/firestore";
+import { Loader2, Plus, History, Trash2 } from "lucide-react";
+import { db } from "@/lib/firebase";
 import Topbar from "@/components/layout/Topbar";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import ProductSearchDropdown from "@/components/products/ProductSearchDropdown";
 import ProductFormModal from "@/components/products/ProductFormModal";
 import { useProductSearch } from "@/lib/hooks/useProductSearch";
 import { PRODUCT_CATEGORIES, Product } from "@/types";
+import toast from "react-hot-toast";
 
 function money(n: number) {
   return n.toLocaleString("en-PK", { maximumFractionDigits: 2 });
@@ -20,9 +23,25 @@ function ProductsContent() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function handleDelete(p: Product) {
+    if (!window.confirm(`Delete "${p.productName}"? This cannot be undone.`)) return;
+    setDeletingId(p.id);
+    try {
+      await deleteDoc(doc(db, "products", p.id));
+      toast.success("Product deleted");
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      console.error(err);
+      toast.error("Could not delete product.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   // Empty term = most recently updated 50 products; smart search kicks in once the admin types.
-  const { results, loading } = useProductSearch("", {});
+  const { results, loading } = useProductSearch("", { refreshKey });
 
   const filtered = useMemo(() => {
     return results.filter((p) => {
@@ -30,7 +49,7 @@ function ProductsContent() {
       if (statusFilter !== "all" && p.status !== statusFilter) return false;
       return true;
     });
-  }, [results, category, statusFilter, refreshKey]);
+  }, [results, category, statusFilter]);
 
   return (
     <main className="flex-1 space-y-4 p-5">
@@ -127,15 +146,25 @@ function ProductsContent() {
                     </span>
                   </td>
                   <td className="px-5 py-3 text-right">
-                    <button
-                      onClick={() => {
-                        setEditing(p);
-                        setModalOpen(true);
-                      }}
-                      className="text-xs font-medium text-brand-600 hover:underline"
-                    >
-                      Edit
-                    </button>
+                    <div className="flex items-center justify-end gap-3">
+                      <button
+                        onClick={() => {
+                          setEditing(p);
+                          setModalOpen(true);
+                        }}
+                        className="text-xs font-medium text-brand-600 hover:underline"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleDelete(p)}
+                        disabled={deletingId === p.id}
+                        className="text-ink-400 hover:text-swatch-clay disabled:opacity-50"
+                        aria-label="Delete product"
+                      >
+                        {deletingId === p.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))

@@ -31,8 +31,8 @@ function mapDoc(d: any): Product {
   };
 }
 
-export function useProductSearch(rawTerm: string, opts: { activeOnly?: boolean } = {}) {
-  const { activeOnly = false } = opts;
+export function useProductSearch(rawTerm: string, opts: { activeOnly?: boolean; refreshKey?: number | string } = {}) {
+  const { activeOnly = false, refreshKey } = opts;
   const [results, setResults] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -83,7 +83,7 @@ export function useProductSearch(rawTerm: string, opts: { activeOnly?: boolean }
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [rawTerm, activeOnly]);
+  }, [rawTerm, activeOnly, refreshKey]);
 
   return { results, loading };
 }
