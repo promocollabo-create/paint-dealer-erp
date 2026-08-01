@@ -68,12 +68,10 @@ export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
 export interface InvoiceLineItem {
   productId: string;
   productName: string;
-  productCode: string;
+  company: string;
+  category: string;
   series: string;
   packing: string;
-  colorName: string;
-  shadeCode: string;
-  unit: string;
   quantity: number;
   unitPrice: number;
   discountPercent: number;
@@ -193,25 +191,30 @@ export const PRODUCT_CATEGORIES = [
   "Other Accessories"
 ] as const;
 
-export const PRODUCT_UNITS = ["Ltr", "Kg", "Pcs", "Box", "Roll", "Gallon", "Set"] as const;
-
 export type ProductStatus = "active" | "inactive";
 export type ProductSource = "priceList" | "manual";
 
+/** One packaging/size variant of a product, each with its own price and GST rate.
+ *  e.g. { packing: "Qtr", retailPrice: 1401.11, gst: 18 } */
+export interface PackagingOption {
+  id: string;
+  packing: string;
+  retailPrice: number;
+  gst: number;
+}
+
+/** Product structure: Company -> Category -> Series -> Product Name -> Packaging.
+ *  One Product Name can have several packaging variants, each carrying its own
+ *  Retail Price (before GST) and GST %. There is no Product Code and no MRP —
+ *  the invoice-facing price is always the packaging's Retail Price plus GST
+ *  computed on that gross amount. */
 export interface Product {
   id: string;
   company: string;
   category: string;
   series: string;
   productName: string;
-  productCode: string;
-  packing: string;
-  colorName: string;
-  shadeCode: string;
-  retailPrice: number;
-  gst: number;
-  mrp: number;
-  unit: string;
+  packagingOptions: PackagingOption[];
   status: ProductStatus;
   source: ProductSource;
   currentPriceListVersionId: string | null;
@@ -220,17 +223,17 @@ export interface Product {
   updatedAt: number;
 }
 
-/** A raw row as parsed from an uploaded PDF/Excel price list, before an admin reviews it. */
+/** A raw row as parsed from an uploaded PDF/Excel price list, before an admin reviews it.
+ *  One row = one packaging variant; rows sharing Company+Category+Series+Product Name are
+ *  grouped into a single Product with multiple packaging options when committed. */
 export interface ParsedPriceRow {
   company: string;
   category: string;
   series: string;
   productName: string;
-  productCode: string;
   packing: string;
   retailPrice: number;
   gst: number;
-  mrp: number;
   /** true when required fields are missing/unparseable and need manual correction before commit */
   needsReview: boolean;
 }
@@ -248,7 +251,7 @@ export interface PriceListVersion {
 }
 
 /** Immutable snapshot row stored under priceListVersions/{id}/items — never edited after commit,
- *  so an old invoice referencing a versionId + productCode always resolves to the original price. */
+ *  so an old invoice referencing a versionId + product/packaging always resolves to the original price. */
 export interface PriceListItem extends ParsedPriceRow {
   id: string;
 }

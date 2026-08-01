@@ -18,28 +18,25 @@ import { db } from "@/lib/firebase";
 import Topbar from "@/components/layout/Topbar";
 import { useAuth } from "@/context/AuthContext";
 import { parseExcelFile, RawSheet } from "@/lib/parsers/excelParser";
-import { parsePdfFile } from "@/lib/parsers/pdfParser";
+import { parsePdfPriceList } from "@/lib/parsers/pdfParser";
 import { autoMapColumns, FIELD_LABELS, PriceListField } from "@/lib/parsers/columnMapper";
 import { buildParsedRows } from "@/lib/parsers/rowBuilder";
 import { generateSearchTokens } from "@/lib/search";
 import { ParsedPriceRow, PriceListVersion } from "@/types";
 import toast from "react-hot-toast";
 
-const REQUIRED_FIELDS: PriceListField[] = ["productName", "productCode"];
-const ALL_FIELDS: PriceListField[] = [
-  "company",
-  "category",
-  "series",
-  "productName",
-  "productCode",
-  "packing",
-  "retailPrice",
-  "gst",
-  "mrp"
-];
+const REQUIRED_FIELDS: PriceListField[] = ["productName", "retailPrice"];
+const ALL_FIELDS: PriceListField[] = ["company", "category", "series", "productName", "packing", "retailPrice", "gst"];
 
 function money(n: number) {
   return n.toLocaleString("en-PK", { maximumFractionDigits: 2 });
+}
+
+/** Groups flat packaging rows into one entry per Company + Category + Series + Product Name,
+ *  each carrying its own list of packaging options. Grouping is case-insensitive/trim-insensitive
+ *  so "Weathershield Emulsion" and "weathershield emulsion " land in the same product. */
+function groupKey(row: Pick<ParsedPriceRow, "company" | "category" | "series" | "productName">) {
+  return [row.company, row.category, row.series, row.productName].map((s) => s.trim().toLowerCase()).join("||");
 }
 
 function VersionHistory({ refreshKey }: { refreshKey: number }) {
@@ -168,14 +165,22 @@ function UploadFlow({ onCommitted }: { onCommitted: () => void }) {
     setFileType(isPdf ? "pdf" : "excel");
 
     try {
-      const parsed = isPdf ? await parsePdfFile(file) : await parseExcelFile(file);
-      if (!parsed.headers.length || !parsed.rows.length) {
-        toast.error("No readable rows were found in that file. Check the format and try again.");
-        setParsing(false);
-        return;
+      if (isPdf) {
+        // PDFs auto-detect the full Company → Category → Series → Product Name → Packaging
+        // hierarchy on their own, so we skip straight to the reviewable preview — no manual
+        // column mapping step needed.
+        const parsed = await parsePdfPriceList(file);
+        setRows(parsed);
+      } else {
+        const parsed = await parseExcelFile(file);
+        if (!parsed.headers.length || !parsed.rows.length) {
+          toast.error("No readable rows were found in that file. Check the format and try again.");
+          setParsing(false);
+          return;
+        }
+        setSheet(parsed);
+        setMapping(autoMapColumns(parsed.headers));
       }
-      setSheet(parsed);
-      setMapping(autoMapColumns(parsed.headers));
     } catch (err: any) {
       console.error(err);
       toast.error(err?.message || "Couldn't read that file. Please check the format and try again.");
@@ -199,12 +204,12 @@ function UploadFlow({ onCommitted }: { onCommitted: () => void }) {
       if (!prev) return prev;
       const next = [...prev];
       const row = { ...next[index] };
-      if (field === "retailPrice" || field === "gst" || field === "mrp") {
+      if (field === "retailPrice" || field === "gst") {
         (row as any)[field] = Number(value) || 0;
       } else if (field !== "needsReview") {
         (row as any)[field] = value;
       }
-      row.needsReview = !row.productName || !row.productCode;
+      row.needsReview = !row.productName || row.retailPrice <= 0;
       next[index] = row;
       return next;
     });
@@ -214,33 +219,60 @@ function UploadFlow({ onCommitted }: { onCommitted: () => void }) {
     setRows((prev) => (prev ? prev.filter((_, i) => i !== index) : prev));
   }
 
+  function resetAll() {
+    setSheet(null);
+    setRows(null);
+    setFileName("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
   async function handleCommit() {
     if (!rows || rows.length === 0) return;
-    const blocking = rows.filter((r) => !r.productName || !r.productCode);
+    const blocking = rows.filter((r) => !r.productName || r.retailPrice <= 0);
     if (blocking.length > 0) {
-      toast.error(`${blocking.length} row(s) are missing a product name or code. Fix or remove them first.`);
+      toast.error(`${blocking.length} row(s) are missing a Product Name or Retail Price. Fix or remove them first.`);
+      return;
+    }
+    if (!rows.every((r) => r.packing)) {
+      toast.error("Every row needs a Packaging value (e.g. Qtr, Gln, Drm).");
       return;
     }
 
-    // Rows that are blank/duplicated within the same file are skipped up front rather than
-    // written twice — importing a file with the same product code twice used to create two
-    // separate product documents for it.
-    const seenCodes = new Set<string>();
-    const dedupedRows: ParsedPriceRow[] = [];
+    // Group packaging rows into products: rows sharing Company + Category + Series + Product
+    // Name become one product with multiple packaging options, instead of one product per row.
+    type Group = {
+      company: string;
+      category: string;
+      series: string;
+      productName: string;
+      packagingOptions: { packing: string; retailPrice: number; gst: number }[];
+    };
+    const groups = new Map<string, Group>();
     let skippedDuplicatesInFile = 0;
+
     for (const row of rows) {
-      const code = row.productCode.trim().toLowerCase();
-      if (seenCodes.has(code)) {
-        skippedDuplicatesInFile++;
-        continue;
+      const key = groupKey(row);
+      let group = groups.get(key);
+      if (!group) {
+        group = { company: row.company, category: row.category, series: row.series, productName: row.productName, packagingOptions: [] };
+        groups.set(key, group);
       }
-      seenCodes.add(code);
-      dedupedRows.push(row);
+      const packingKey = row.packing.trim().toLowerCase();
+      const existingOption = group.packagingOptions.find((o) => o.packing.trim().toLowerCase() === packingKey);
+      if (existingOption) {
+        // same product + same packaging appeared twice in this file — last one wins, first is skipped
+        existingOption.retailPrice = row.retailPrice;
+        existingOption.gst = row.gst;
+        skippedDuplicatesInFile++;
+      } else {
+        group.packagingOptions.push({ packing: row.packing, retailPrice: row.retailPrice, gst: row.gst });
+      }
     }
+    const dedupedGroups = Array.from(groups.values());
 
     setCommitting(true);
     setSummary(null);
-    setProgress({ done: 0, total: dedupedRows.length });
+    setProgress({ done: 0, total: dedupedGroups.length });
 
     let created = 0;
     let updated = 0;
@@ -259,14 +291,14 @@ function UploadFlow({ onCommitted }: { onCommitted: () => void }) {
           effectiveDate: new Date(effectiveDate),
           uploadedBy: appUser?.name ?? appUser?.email ?? "unknown",
           uploadedAt: serverTimestamp(),
-          itemCount: dedupedRows.length,
+          itemCount: rows.length,
           notes: ""
         })
         .commit();
 
-      // 1) Write the immutable snapshot rows in batches of 400 (Firestore batch limit is 500 writes).
-      for (let i = 0; i < dedupedRows.length; i += 400) {
-        const chunk = dedupedRows.slice(i, i + 400);
+      // 1) Write the immutable snapshot rows (one per packaging variant) in batches of 400.
+      for (let i = 0; i < rows.length; i += 400) {
+        const chunk = rows.slice(i, i + 400);
         const batch = writeBatch(db);
         for (const row of chunk) {
           const itemRef = doc(collection(db, "priceListVersions", versionRef.id, "items"));
@@ -275,58 +307,72 @@ function UploadFlow({ onCommitted }: { onCommitted: () => void }) {
         await batch.commit();
       }
 
-      // 2) Upsert the live product catalog by productCode. Each row is handled independently
-      //    so one bad row can't fail the entire import — it's just counted under "failed".
+      // 2) Upsert the live product catalog by Company+Category+Series+Product Name. Each group
+      //    is handled independently so one bad group can't fail the whole import.
       let done = 0;
-      for (let i = 0; i < dedupedRows.length; i += 25) {
-        const chunk = dedupedRows.slice(i, i + 25);
+      for (let i = 0; i < dedupedGroups.length; i += 25) {
+        const chunk = dedupedGroups.slice(i, i + 25);
         const batch = writeBatch(db);
         const chunkResults: ("created" | "updated" | "failed")[] = [];
 
-        for (const row of chunk) {
+        for (const group of chunk) {
           try {
             const existing = await getDocs(
-              query(collection(db, "products"), where("productCode", "==", row.productCode), fsLimit(1))
+              query(
+                collection(db, "products"),
+                where("company", "==", group.company),
+                where("category", "==", group.category),
+                where("series", "==", group.series),
+                where("productName", "==", group.productName),
+                fsLimit(1)
+              )
             );
             const searchTokens = generateSearchTokens({
-              productName: row.productName,
-              productCode: row.productCode,
-              category: row.category,
-              series: row.series,
-              company: row.company
+              productName: group.productName,
+              category: group.category,
+              series: group.series,
+              company: group.company
             });
-            const priceFields = {
-              company: row.company,
-              category: row.category || "Other Accessories",
-              series: row.series,
-              productName: row.productName,
-              productCode: row.productCode,
-              packing: row.packing,
-              retailPrice: row.retailPrice,
-              gst: row.gst,
-              mrp: row.mrp,
-              currentPriceListVersionId: versionRef.id,
-              searchTokens,
-              updatedAt: serverTimestamp()
-            };
+
             if (!existing.empty) {
-              batch.update(existing.docs[0].ref, priceFields);
+              const existingData = existing.docs[0].data();
+              const existingOptions: { id: string; packing: string; retailPrice: number; gst: number }[] =
+                existingData.packagingOptions ?? [];
+              const mergedOptions = [...existingOptions];
+              for (const opt of group.packagingOptions) {
+                const idx = mergedOptions.findIndex((o) => o.packing.trim().toLowerCase() === opt.packing.trim().toLowerCase());
+                if (idx !== -1) {
+                  mergedOptions[idx] = { ...mergedOptions[idx], retailPrice: opt.retailPrice, gst: opt.gst };
+                } else {
+                  mergedOptions.push({ id: doc(collection(db, "products")).id, ...opt });
+                }
+              }
+              batch.update(existing.docs[0].ref, {
+                packagingOptions: mergedOptions,
+                currentPriceListVersionId: versionRef.id,
+                searchTokens,
+                updatedAt: serverTimestamp()
+              });
               chunkResults.push("updated");
             } else {
               const newRef = doc(collection(db, "products"));
               batch.set(newRef, {
-                ...priceFields,
-                colorName: "",
-                shadeCode: "",
-                unit: "",
+                company: group.company,
+                category: group.category || "Other Accessories",
+                series: group.series,
+                productName: group.productName,
+                packagingOptions: group.packagingOptions.map((o) => ({ id: doc(collection(db, "products")).id, ...o })),
+                currentPriceListVersionId: versionRef.id,
+                searchTokens,
                 status: "active",
                 source: "priceList",
-                createdAt: serverTimestamp()
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp()
               });
               chunkResults.push("created");
             }
           } catch (rowErr) {
-            console.error("Row failed:", row.productCode, rowErr);
+            console.error("Group failed:", group.productName, rowErr);
             chunkResults.push("failed");
           }
         }
@@ -344,7 +390,7 @@ function UploadFlow({ onCommitted }: { onCommitted: () => void }) {
         }
 
         done += chunk.length;
-        setProgress({ done, total: dedupedRows.length });
+        setProgress({ done, total: dedupedGroups.length });
       }
 
       setSummary({ created, updated, skipped: skippedDuplicatesInFile, failed });
@@ -353,15 +399,12 @@ function UploadFlow({ onCommitted }: { onCommitted: () => void }) {
         toast.error(`Imported with ${failed} failure(s). See summary below.`);
       } else {
         toast.success(
-          `Price list version ${versionNumber} committed — ${created} added, ${updated} updated${
-            skippedDuplicatesInFile ? `, ${skippedDuplicatesInFile} duplicate rows skipped` : ""
+          `Price list version ${versionNumber} committed — ${created} product(s) added, ${updated} updated${
+            skippedDuplicatesInFile ? `, ${skippedDuplicatesInFile} duplicate packaging rows merged` : ""
           }.`
         );
       }
-      setSheet(null);
-      setRows(null);
-      setFileName("");
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      resetAll();
       onCommitted();
     } catch (err) {
       console.error(err);
@@ -377,8 +420,9 @@ function UploadFlow({ onCommitted }: { onCommitted: () => void }) {
       <h2 className="mb-1 font-display text-base font-semibold">Upload Price List</h2>
       <p className="mb-4 text-sm text-ink-500 dark:text-ink-400">
         Supports Excel (.xlsx, .xls, .csv) and PDF. We'll auto-detect Company, Category, Series,
-        Product, Product Code, Packing, Retail Price, GST, and MRP — you can correct anything
-        before it's saved.
+        Product Name, Packaging, Retail Price, and GST — you can correct anything before it's
+        saved. Rows that share the same Company, Category, Series and Product Name are grouped
+        into one product with multiple packaging options.
       </p>
 
       {summary && (
@@ -392,7 +436,7 @@ function UploadFlow({ onCommitted }: { onCommitted: () => void }) {
             <p className="font-display text-lg font-semibold text-swatch-teal">{summary.updated}</p>
           </div>
           <div>
-            <p className="text-xs uppercase tracking-wide text-ink-400">Skipped (dupes)</p>
+            <p className="text-xs uppercase tracking-wide text-ink-400">Merged (dupes)</p>
             <p className="font-display text-lg font-semibold text-swatch-ochre">{summary.skipped}</p>
           </div>
           <div>
@@ -402,7 +446,7 @@ function UploadFlow({ onCommitted }: { onCommitted: () => void }) {
         </div>
       )}
 
-      {!sheet && (
+      {!sheet && !rows && (
         <label className="flex cursor-pointer flex-col items-center gap-2 rounded-xl2 border-2 border-dashed border-ink-200 py-10 text-center hover:border-brand-400 dark:border-ink-700">
           {parsing ? <Loader2 className="h-6 w-6 animate-spin text-brand-500" /> : <Upload className="h-6 w-6 text-ink-400" />}
           <span className="text-sm font-medium">{parsing ? "Reading file…" : "Click to upload a price list"}</span>
@@ -449,14 +493,7 @@ function UploadFlow({ onCommitted }: { onCommitted: () => void }) {
             ))}
           </div>
           <div className="flex justify-end gap-3">
-            <button
-              className="btn-secondary"
-              onClick={() => {
-                setSheet(null);
-                setFileName("");
-                if (fileInputRef.current) fileInputRef.current.value = "";
-              }}
-            >
+            <button className="btn-secondary" onClick={resetAll}>
               Cancel
             </button>
             <button className="btn-primary" onClick={buildPreview}>
@@ -470,7 +507,7 @@ function UploadFlow({ onCommitted }: { onCommitted: () => void }) {
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-sm">
-              <span className="font-medium">{rows.length} rows</span>
+              <span className="font-medium">{rows.length} packaging rows</span>
               {rows.some((r) => r.needsReview) && (
                 <span className="badge bg-swatch-clay/10 text-swatch-clay">
                   <AlertTriangle className="mr-1 inline h-3 w-3" />
@@ -493,27 +530,19 @@ function UploadFlow({ onCommitted }: { onCommitted: () => void }) {
             <table className="w-full text-left text-xs">
               <thead className="sticky top-0 border-b border-ink-100 bg-ink-50 uppercase tracking-wide text-ink-400 dark:border-ink-800 dark:bg-ink-800">
                 <tr>
-                  <th className="px-3 py-2">Product</th>
-                  <th className="px-3 py-2">Code</th>
                   <th className="px-3 py-2">Company</th>
                   <th className="px-3 py-2">Category</th>
                   <th className="px-3 py-2">Series</th>
-                  <th className="px-3 py-2">Packing</th>
+                  <th className="px-3 py-2">Product Name</th>
+                  <th className="px-3 py-2">Packaging</th>
                   <th className="px-3 py-2 text-right">RP</th>
-                  <th className="px-3 py-2 text-right">GST</th>
-                  <th className="px-3 py-2 text-right">MRP</th>
+                  <th className="px-3 py-2 text-right">GST %</th>
                   <th className="px-3 py-2"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
                 {rows.map((row, i) => (
                   <tr key={i} className={row.needsReview ? "bg-swatch-clay/5" : ""}>
-                    <td className="px-2 py-1.5">
-                      <input className="input px-2 py-1 text-xs" value={row.productName} onChange={(e) => updateRow(i, "productName", e.target.value)} />
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <input className="input px-2 py-1 text-xs" value={row.productCode} onChange={(e) => updateRow(i, "productCode", e.target.value)} />
-                    </td>
                     <td className="px-2 py-1.5">
                       <input className="input px-2 py-1 text-xs" value={row.company} onChange={(e) => updateRow(i, "company", e.target.value)} />
                     </td>
@@ -524,16 +553,16 @@ function UploadFlow({ onCommitted }: { onCommitted: () => void }) {
                       <input className="input px-2 py-1 text-xs" value={row.series} onChange={(e) => updateRow(i, "series", e.target.value)} />
                     </td>
                     <td className="px-2 py-1.5">
+                      <input className="input px-2 py-1 text-xs" value={row.productName} onChange={(e) => updateRow(i, "productName", e.target.value)} />
+                    </td>
+                    <td className="px-2 py-1.5">
                       <input className="input px-2 py-1 text-xs" value={row.packing} onChange={(e) => updateRow(i, "packing", e.target.value)} />
                     </td>
                     <td className="px-2 py-1.5">
-                      <input type="number" className="input w-20 px-2 py-1 text-right text-xs" value={row.retailPrice} onChange={(e) => updateRow(i, "retailPrice", e.target.value)} />
+                      <input type="number" className="input w-24 px-2 py-1 text-right text-xs" value={row.retailPrice} onChange={(e) => updateRow(i, "retailPrice", e.target.value)} />
                     </td>
                     <td className="px-2 py-1.5">
                       <input type="number" className="input w-16 px-2 py-1 text-right text-xs" value={row.gst} onChange={(e) => updateRow(i, "gst", e.target.value)} />
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <input type="number" className="input w-20 px-2 py-1 text-right text-xs" value={row.mrp} onChange={(e) => updateRow(i, "mrp", e.target.value)} />
                     </td>
                     <td className="px-2 py-1.5 text-right">
                       <button type="button" onClick={() => removeRow(i)} className="text-swatch-clay hover:underline">
@@ -546,6 +575,10 @@ function UploadFlow({ onCommitted }: { onCommitted: () => void }) {
             </table>
           </div>
 
+          <p className="text-xs text-ink-400">
+            {new Set(rows.map(groupKey)).size} distinct product(s) will be created/updated from these {rows.length} packaging rows.
+          </p>
+
           {progress && (
             <div className="text-sm text-ink-500 dark:text-ink-400">
               Committing… {progress.done} / {progress.total}
@@ -557,10 +590,14 @@ function UploadFlow({ onCommitted }: { onCommitted: () => void }) {
               className="btn-secondary"
               disabled={committing}
               onClick={() => {
-                setRows(null);
+                if (fileType === "excel") {
+                  setRows(null);
+                } else {
+                  resetAll();
+                }
               }}
             >
-              Back to Mapping
+              {fileType === "excel" ? "Back to Mapping" : "Start Over"}
             </button>
             <button className="btn-primary" disabled={committing || rows.length === 0} onClick={handleCommit}>
               {committing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}

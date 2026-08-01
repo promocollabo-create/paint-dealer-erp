@@ -1,38 +1,25 @@
-export type PriceListField =
-  | "company"
-  | "category"
-  | "series"
-  | "productName"
-  | "productCode"
-  | "packing"
-  | "retailPrice"
-  | "gst"
-  | "mrp";
+export type PriceListField = "company" | "category" | "series" | "productName" | "packing" | "retailPrice" | "gst";
 
 export const FIELD_LABELS: Record<PriceListField, string> = {
   company: "Company",
   category: "Category",
   series: "Series",
-  productName: "Product",
-  productCode: "Product Code",
-  packing: "Packing",
+  productName: "Product Name",
+  packing: "Packaging",
   retailPrice: "Retail Price (RP)",
-  gst: "GST",
-  mrp: "MRP"
+  gst: "GST %"
 };
 
-// Ordered by specificity — longer/more-specific aliases first so e.g. "product code"
-// isn't accidentally swallowed by a looser "product" match.
+// Ordered by specificity — longer/more-specific aliases first so a looser match doesn't
+// accidentally swallow a more specific column.
 const FIELD_ALIASES: Record<PriceListField, string[]> = {
-  productCode: ["product code", "item code", "sku", "code", "prod code"],
   productName: ["product name", "product", "item name", "item", "description"],
   company: ["company", "brand", "manufacturer"],
   category: ["category", "cat"],
   series: ["series", "range", "collection"],
-  packing: ["packing", "pack size", "pack", "size"],
+  packing: ["packaging", "packing", "pack size", "pack", "size"],
   retailPrice: ["retail price", "rp", "trade price", "dealer price", "net price"],
-  gst: ["gst", "tax", "sales tax", "gst%", "gst %"],
-  mrp: ["mrp", "retail", "list price", "max retail price"]
+  gst: ["gst", "tax", "sales tax", "gst%", "gst %"]
 };
 
 function normalize(header: string): string {

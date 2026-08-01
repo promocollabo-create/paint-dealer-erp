@@ -102,11 +102,11 @@ function ProductsContent() {
           <thead className="border-b border-ink-100 text-xs uppercase tracking-wide text-ink-400 dark:border-ink-800">
             <tr>
               <th className="px-5 py-3">Product</th>
-              <th className="px-5 py-3">Code</th>
               <th className="px-5 py-3">Category</th>
               <th className="px-5 py-3">Company</th>
-              <th className="px-5 py-3">Packing</th>
-              <th className="px-5 py-3 text-right">MRP</th>
+              <th className="px-5 py-3">Series</th>
+              <th className="px-5 py-3">Packaging</th>
+              <th className="px-5 py-3 text-right">Retail Price</th>
               <th className="px-5 py-3">Status</th>
               <th className="px-5 py-3"></th>
             </tr>
@@ -128,11 +128,21 @@ function ProductsContent() {
               filtered.map((p) => (
                 <tr key={p.id} className="hover:bg-ink-50 dark:hover:bg-ink-800/50">
                   <td className="px-5 py-3 font-medium">{p.productName}</td>
-                  <td className="px-5 py-3 font-mono text-xs text-ink-500">{p.productCode}</td>
                   <td className="px-5 py-3">{p.category}</td>
                   <td className="px-5 py-3">{p.company || "—"}</td>
-                  <td className="px-5 py-3">{p.packing || "—"}</td>
-                  <td className="px-5 py-3 text-right">{money(p.mrp)}</td>
+                  <td className="px-5 py-3">{p.series || "—"}</td>
+                  <td className="px-5 py-3">
+                    {p.packagingOptions.length > 0 ? p.packagingOptions.map((o) => o.packing).join(", ") : "—"}
+                  </td>
+                  <td className="px-5 py-3 text-right">
+                    {p.packagingOptions.length > 0
+                      ? p.packagingOptions.length === 1
+                        ? money(p.packagingOptions[0].retailPrice)
+                        : `${money(Math.min(...p.packagingOptions.map((o) => o.retailPrice)))} – ${money(
+                            Math.max(...p.packagingOptions.map((o) => o.retailPrice))
+                          )}`
+                      : "—"}
+                  </td>
                   <td className="px-5 py-3">
                     <span
                       className={`badge ${

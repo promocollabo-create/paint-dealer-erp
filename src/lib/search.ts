@@ -21,12 +21,11 @@ function wordPrefixes(word: string): string[] {
 
 export function generateSearchTokens(fields: {
   productName: string;
-  productCode: string;
   category: string;
   series: string;
   company: string;
 }): string[] {
-  const words = [fields.productName, fields.productCode, fields.category, fields.series, fields.company]
+  const words = [fields.productName, fields.category, fields.series, fields.company]
     .join(" ")
     .split(/[\s\-_/]+/)
     .filter(Boolean);

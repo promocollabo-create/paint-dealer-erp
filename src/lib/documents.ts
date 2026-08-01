@@ -56,9 +56,9 @@ export function buildInvoicePdf(invoice: Invoice, shop: ShopSettings): jsPDF {
 
   const rows = invoice.items.map((it, idx) => [
     String(idx + 1),
-    `${it.productName}${it.colorName ? ` (${it.colorName})` : ""}${it.shadeCode ? ` [${it.shadeCode}]` : ""}`,
+    it.productName,
     it.packing || "-",
-    `${it.quantity} ${it.unit}`,
+    String(it.quantity),
     money(it.unitPrice, shop.currency),
     `${it.discountPercent}%`,
     `${it.gstPercent}%`,

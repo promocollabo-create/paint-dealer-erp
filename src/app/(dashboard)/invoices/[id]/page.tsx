@@ -162,15 +162,12 @@ function InvoiceDetailContent() {
                   <td className="py-2.5 pr-3">
                     <p className="font-medium">{it.productName}</p>
                     <p className="text-xs text-ink-400">
-                      {it.productCode}
-                      {it.colorName ? ` · ${it.colorName}` : ""}
-                      {it.shadeCode ? ` · ${it.shadeCode}` : ""}
+                      {it.series}
+                      {it.company ? ` · ${it.company}` : ""}
                     </p>
                   </td>
                   <td className="py-2.5 pr-3">{it.packing || "—"}</td>
-                  <td className="py-2.5 pr-3 text-right">
-                    {it.quantity} {it.unit}
-                  </td>
+                  <td className="py-2.5 pr-3 text-right">{it.quantity}</td>
                   <td className="py-2.5 pr-3 text-right">{money(it.unitPrice, currency)}</td>
                   <td className="py-2.5 pr-3 text-right">{it.discountPercent}%</td>
                   <td className="py-2.5 pr-3 text-right">{it.gstPercent}%</td>

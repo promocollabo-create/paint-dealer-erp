@@ -6,7 +6,7 @@ import { useProductSearch } from "@/lib/hooks/useProductSearch";
 import { Product } from "@/types";
 
 export default function ProductSearchDropdown({
-  placeholder = "Search by name, code, category, series, or company",
+  placeholder = "Search by product name, category, series, or company",
   activeOnly = false,
   onSelect
 }: {
@@ -58,13 +58,15 @@ export default function ProductSearchDropdown({
                 <div className="min-w-0">
                   <p className="truncate font-medium">{p.productName}</p>
                   <p className="truncate text-xs text-ink-500 dark:text-ink-400">
-                    {p.productCode} · {p.category}
+                    {p.category}
+                    {p.series ? ` · ${p.series}` : ""}
                     {p.company ? ` · ${p.company}` : ""}
-                    {p.packing ? ` · ${p.packing}` : ""}
                   </p>
                 </div>
                 <div className="shrink-0 text-right">
-                  <p className="font-medium">{p.mrp.toLocaleString("en-PK")}</p>
+                  <p className="font-medium">
+                    {p.packagingOptions.length} {p.packagingOptions.length === 1 ? "size" : "sizes"}
+                  </p>
                   {p.status === "inactive" && <span className="badge bg-ink-100 text-ink-500 dark:bg-ink-700">Inactive</span>}
                 </div>
               </button>

@@ -39,25 +39,113 @@ function computeLine(line: DraftLine): DraftLine {
   return { ...line, discountAmount, gstAmount, lineTotal };
 }
 
-function draftFromProduct(p: Product): DraftLine {
-  return computeLine({
-    rowId: newRowId(),
-    productId: p.id,
-    productName: p.productName,
-    productCode: p.productCode,
-    series: p.series,
-    packing: p.packing,
-    colorName: p.colorName,
-    shadeCode: p.shadeCode,
-    unit: p.unit || "Pcs",
-    quantity: 1,
-    unitPrice: p.mrp || p.retailPrice || 0,
-    discountPercent: 0,
-    discountAmount: 0,
-    gstPercent: p.gst || 0,
-    gstAmount: 0,
-    lineTotal: 0
-  });
+/** Product selection follows Series → Product Name → Packaging. Once a product is picked from
+ *  search, this panel lets the user choose which packaging (size) to invoice — selecting a
+ *  packaging automatically loads that variant's Retail Price and GST %, per the Allied Paint
+ *  price list structure (Company → Category → Series → Product Name → Packaging). */
+function ProductPickerPanel({ onAdd }: { onAdd: (line: DraftLine) => void }) {
+  const [pendingProduct, setPendingProduct] = useState<Product | null>(null);
+  const [packagingId, setPackagingId] = useState<string>("");
+  const [quantity, setQuantity] = useState("1");
+  const [discountPercent, setDiscountPercent] = useState("0");
+
+  const selectedOption = pendingProduct?.packagingOptions.find((o) => o.id === packagingId) ?? null;
+
+  function selectProduct(p: Product) {
+    setPendingProduct(p);
+    setPackagingId(p.packagingOptions[0]?.id ?? "");
+    setQuantity("1");
+    setDiscountPercent("0");
+  }
+
+  function handleAdd() {
+    if (!pendingProduct || !selectedOption) {
+      toast.error("Select a packaging option first.");
+      return;
+    }
+    const qty = Number(quantity) || 0;
+    if (qty <= 0) {
+      toast.error("Quantity must be greater than 0.");
+      return;
+    }
+    const line = computeLine({
+      rowId: newRowId(),
+      productId: pendingProduct.id,
+      productName: pendingProduct.productName,
+      company: pendingProduct.company,
+      category: pendingProduct.category,
+      series: pendingProduct.series,
+      packing: selectedOption.packing,
+      quantity: qty,
+      unitPrice: selectedOption.retailPrice,
+      discountPercent: Number(discountPercent) || 0,
+      discountAmount: 0,
+      gstPercent: selectedOption.gst,
+      gstAmount: 0,
+      lineTotal: 0
+    });
+    onAdd(line);
+    setPendingProduct(null);
+    setPackagingId("");
+  }
+
+  return (
+    <div className="space-y-3">
+      <ProductSearchDropdown activeOnly onSelect={selectProduct} />
+
+      {pendingProduct && (
+        <div className="space-y-3 rounded-lg border border-ink-100 bg-ink-50 p-4 dark:border-ink-800 dark:bg-ink-800">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs text-ink-500 dark:text-ink-400">
+                Series: {pendingProduct.series || "—"}
+              </p>
+              <p className="font-medium">Product: {pendingProduct.productName}</p>
+            </div>
+            <button type="button" onClick={() => setPendingProduct(null)} className="text-ink-400 hover:text-ink-600 dark:hover:text-ink-200">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div>
+              <label className="label">Packaging</label>
+              <select className="input" value={packagingId} onChange={(e) => setPackagingId(e.target.value)}>
+                {pendingProduct.packagingOptions.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.packing}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label">Retail Price</label>
+              <div className="input flex items-center bg-white dark:bg-ink-900">{selectedOption ? money(selectedOption.retailPrice) : "—"}</div>
+            </div>
+            <div>
+              <label className="label">GST %</label>
+              <div className="input flex items-center bg-white dark:bg-ink-900">{selectedOption ? `${selectedOption.gst}%` : "—"}</div>
+            </div>
+            <div>
+              <label className="label">Quantity</label>
+              <input type="number" min="0.01" step="0.01" className="input" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div>
+              <label className="label">Discount %</label>
+              <input type="number" min="0" max="100" step="0.01" className="input" value={discountPercent} onChange={(e) => setDiscountPercent(e.target.value)} />
+            </div>
+          </div>
+
+          <button type="button" onClick={handleAdd} className="btn-primary">
+            <Plus className="h-4 w-4" /> Add to Invoice
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function NewInvoiceForm() {
@@ -134,8 +222,8 @@ function NewInvoiceForm() {
     };
   }, [duplicateId]);
 
-  function addProduct(p: Product) {
-    setLines((prev) => [...prev, draftFromProduct(p)]);
+  function addLine(line: DraftLine) {
+    setLines((prev) => [...prev, line]);
   }
 
   function updateLine(rowId: string, patch: Partial<DraftLine>) {
@@ -238,7 +326,7 @@ function NewInvoiceForm() {
       <div className="card space-y-4">
         <h2 className="font-display text-base font-semibold">2. Products</h2>
         <div className="max-w-lg">
-          <ProductSearchDropdown activeOnly onSelect={addProduct} />
+          <ProductPickerPanel onAdd={addLine} />
         </div>
 
         {lines.length > 0 && (
@@ -248,11 +336,9 @@ function NewInvoiceForm() {
                 <tr>
                   <th className="px-3 py-2">Product</th>
                   <th className="px-3 py-2">Series</th>
-                  <th className="px-3 py-2">Packing</th>
-                  <th className="px-3 py-2">Color</th>
-                  <th className="px-3 py-2">Shade</th>
+                  <th className="px-3 py-2">Packaging</th>
                   <th className="px-3 py-2 text-right">Qty</th>
-                  <th className="px-3 py-2 text-right">Unit Price</th>
+                  <th className="px-3 py-2 text-right">Retail Price</th>
                   <th className="px-3 py-2 text-right">Disc. %</th>
                   <th className="px-3 py-2 text-right">GST %</th>
                   <th className="px-3 py-2 text-right">Line Total</th>
@@ -264,26 +350,10 @@ function NewInvoiceForm() {
                   <tr key={l.rowId}>
                     <td className="px-3 py-2">
                       <p className="font-medium">{l.productName}</p>
-                      <p className="text-ink-400">{l.productCode}</p>
+                      <p className="text-ink-400">{l.company}</p>
                     </td>
                     <td className="px-3 py-2">{l.series || "—"}</td>
                     <td className="px-3 py-2">{l.packing || "—"}</td>
-                    <td className="px-2 py-1.5">
-                      <input
-                        className="input px-2 py-1 text-xs"
-                        placeholder="Optional"
-                        value={l.colorName}
-                        onChange={(e) => updateLine(l.rowId, { colorName: e.target.value })}
-                      />
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <input
-                        className="input px-2 py-1 text-xs"
-                        placeholder="Optional"
-                        value={l.shadeCode}
-                        onChange={(e) => updateLine(l.rowId, { shadeCode: e.target.value })}
-                      />
-                    </td>
                     <td className="px-2 py-1.5">
                       <input
                         type="number"
@@ -338,7 +408,7 @@ function NewInvoiceForm() {
             </table>
           </div>
         )}
-        {lines.length === 0 && <p className="text-sm text-ink-400">Search a product above to add it as a line item.</p>}
+        {lines.length === 0 && <p className="text-sm text-ink-400">Search a product above, choose its packaging, then add it as a line item.</p>}
       </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">

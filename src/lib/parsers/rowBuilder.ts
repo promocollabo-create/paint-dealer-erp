@@ -13,22 +13,18 @@ export function buildParsedRows(
     };
 
     const productName = get("productName");
-    const productCode = get("productCode");
     const retailPrice = toNumber(get("retailPrice"));
-    const mrp = toNumber(get("mrp"));
 
-    const needsReview = !productName || !productCode || (retailPrice === 0 && mrp === 0);
+    const needsReview = !productName || retailPrice === 0;
 
     return {
       company: get("company"),
       category: get("category"),
       series: get("series"),
       productName,
-      productCode,
       packing: get("packing"),
       retailPrice,
       gst: toNumber(get("gst")),
-      mrp,
       needsReview
     };
   });

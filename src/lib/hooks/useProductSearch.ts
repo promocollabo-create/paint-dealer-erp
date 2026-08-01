@@ -14,14 +14,14 @@ function mapDoc(d: any): Product {
     category: data.category ?? "",
     series: data.series ?? "",
     productName: data.productName ?? "",
-    productCode: data.productCode ?? "",
-    packing: data.packing ?? "",
-    colorName: data.colorName ?? "",
-    shadeCode: data.shadeCode ?? "",
-    retailPrice: data.retailPrice ?? 0,
-    gst: data.gst ?? 0,
-    mrp: data.mrp ?? 0,
-    unit: data.unit ?? "",
+    packagingOptions: Array.isArray(data.packagingOptions)
+      ? data.packagingOptions.map((o: any) => ({
+          id: o.id ?? "",
+          packing: o.packing ?? "",
+          retailPrice: o.retailPrice ?? 0,
+          gst: o.gst ?? 0
+        }))
+      : [],
     status: data.status ?? "active",
     source: data.source ?? "manual",
     currentPriceListVersionId: data.currentPriceListVersionId ?? null,
@@ -60,7 +60,7 @@ export function useProductSearch(rawTerm: string, opts: { activeOnly?: boolean; 
           if (words.length > 1) {
             docs = docs.filter((d) => {
               const p = mapDoc(d);
-              const haystack = `${p.productName} ${p.productCode} ${p.category} ${p.series} ${p.company}`.toLowerCase();
+              const haystack = `${p.productName} ${p.category} ${p.series} ${p.company}`.toLowerCase();
               return words.every((w) => haystack.includes(w));
             });
           }
