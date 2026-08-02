@@ -10,52 +10,16 @@ function fmtDate(ms: number) {
   return new Date(ms).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-/** Fetches shop.logoUrl and normalizes it to a PNG data URL jsPDF can embed, regardless of
- *  whether the original was PNG/JPG/WEBP. Deliberately never throws: if the fetch fails (most
- *  commonly because the Storage bucket has no CORS policy allowing this origin to read the
- *  image bytes — a browser thing, unrelated to Storage security rules), invoice PDF/print
- *  generation must still work exactly as before, just without the logo. */
-async function loadLogoAsPngDataUrl(url: string): Promise<{ dataUrl: string; aspect: number } | null> {
-  try {
-    const res = await fetch(url, { mode: "cors" });
-    if (!res.ok) return null;
-    const blob = await res.blob();
-    const bitmap = await createImageBitmap(blob);
-    const canvas = document.createElement("canvas");
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    ctx.drawImage(bitmap, 0, 0);
-    return { dataUrl: canvas.toDataURL("image/png"), aspect: bitmap.height / bitmap.width };
-  } catch (e) {
-    console.warn(
-      "Could not load the shop logo for the PDF (this is usually a missing CORS config on the Storage bucket, not a broken logo):",
-      e
-    );
-    return null;
-  }
-}
-
 /* ----------------------------------- PDF: Invoice ----------------------------------- */
 
-export async function buildInvoicePdf(invoice: Invoice, shop: ShopSettings): Promise<jsPDF> {
+export function buildInvoicePdf(invoice: Invoice, shop: ShopSettings): jsPDF {
   const docPdf = new jsPDF({ unit: "pt", format: "a4" });
   const pageWidth = docPdf.internal.pageSize.getWidth();
   const margin = 40;
 
-  const logo = shop.logoUrl ? await loadLogoAsPngDataUrl(shop.logoUrl) : null;
-  const LOGO_W = 42;
-  let textX = margin;
-  if (logo) {
-    const logoH = Math.min(42, LOGO_W * logo.aspect);
-    docPdf.addImage(logo.dataUrl, "PNG", margin, 26, LOGO_W, logoH);
-    textX = margin + LOGO_W + 10;
-  }
-
   docPdf.setFont("helvetica", "bold");
   docPdf.setFontSize(16);
-  docPdf.text(shop.shopName || "Paint Dealer", textX, 50);
+  docPdf.text(shop.shopName || "Paint Dealer", margin, 50);
 
   docPdf.setFont("helvetica", "normal");
   docPdf.setFontSize(9);
@@ -64,7 +28,7 @@ export async function buildInvoicePdf(invoice: Invoice, shop: ShopSettings): Pro
     Boolean
   ) as string[];
   shopLines.forEach((line) => {
-    docPdf.text(String(line), textX, y);
+    docPdf.text(String(line), margin, y);
     y += 12;
   });
 
@@ -148,8 +112,8 @@ export async function buildInvoicePdf(invoice: Invoice, shop: ShopSettings): Pro
   return docPdf;
 }
 
-export async function downloadInvoicePdf(invoice: Invoice, shop: ShopSettings) {
-  const pdf = await buildInvoicePdf(invoice, shop);
+export function downloadInvoicePdf(invoice: Invoice, shop: ShopSettings) {
+  const pdf = buildInvoicePdf(invoice, shop);
   pdf.save(`${invoice.invoiceNumber}.pdf`);
 }
 
@@ -223,8 +187,8 @@ export function downloadReceiptPdf(payment: Payment, shop: ShopSettings) {
 
 /* ----------------------------------- Print ----------------------------------- */
 
-export async function printInvoice(invoice: Invoice, shop: ShopSettings) {
-  const pdf = await buildInvoicePdf(invoice, shop);
+export function printInvoice(invoice: Invoice, shop: ShopSettings) {
+  const pdf = buildInvoicePdf(invoice, shop);
   const blobUrl = pdf.output("bloburl");
   const win = window.open(blobUrl as unknown as string, "_blank");
   win?.addEventListener("load", () => win.print());
