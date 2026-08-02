@@ -40,6 +40,44 @@ function computeLine(line: DraftLine): DraftLine {
   return { ...line, discountAmount, gstAmount, lineTotal };
 }
 
+/** Touch-friendly [-] value [+] quantity control used on mobile item cards and pickers —
+ *  large tap targets instead of relying on the native number input's tiny spinner arrows. */
+function QuantityStepper({ value, onChange }: { value: string; onChange: (next: string) => void }) {
+  function step(delta: number) {
+    const next = Math.max(0.01, Math.round(((Number(value) || 0) + delta) * 100) / 100);
+    onChange(String(next));
+  }
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        onClick={() => step(-1)}
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-ink-200 text-ink-600 hover:bg-ink-50 dark:border-ink-700 dark:text-ink-200 dark:hover:bg-ink-800"
+        aria-label="Decrease quantity"
+      >
+        −
+      </button>
+      <input
+        type="number"
+        inputMode="decimal"
+        min="0.01"
+        step="0.01"
+        className="input h-10 w-16 px-1 text-center"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <button
+        type="button"
+        onClick={() => step(1)}
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-ink-200 text-ink-600 hover:bg-ink-50 dark:border-ink-700 dark:text-ink-200 dark:hover:bg-ink-800"
+        aria-label="Increase quantity"
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
 /** Top-level product picker for a new invoice line. Paint and Paint Accessories are picked
  *  differently (Paint carries stored GST per packing; Accessories never store GST — it's
  *  entered manually per line, defaulting to 0%) so the user first chooses which type of item
@@ -79,6 +117,8 @@ function PaintPickerPanel({ onAdd }: { onAdd: (line: DraftLine) => void }) {
   const [packagingId, setPackagingId] = useState<string>("");
   const [quantity, setQuantity] = useState("1");
   const [discountPercent, setDiscountPercent] = useState("0");
+  const [shadeCode, setShadeCode] = useState("");
+  const [shadeName, setShadeName] = useState("");
 
   const selectedOption = pendingProduct?.packagingOptions.find((o) => o.id === packagingId) ?? null;
 
@@ -87,6 +127,8 @@ function PaintPickerPanel({ onAdd }: { onAdd: (line: DraftLine) => void }) {
     setPackagingId(p.packagingOptions[0]?.id ?? "");
     setQuantity("1");
     setDiscountPercent("0");
+    setShadeCode("");
+    setShadeName("");
   }
 
   function handleAdd() {
@@ -107,6 +149,8 @@ function PaintPickerPanel({ onAdd }: { onAdd: (line: DraftLine) => void }) {
       category: pendingProduct.category,
       series: pendingProduct.series,
       packing: selectedOption.packing,
+      shadeCode: shadeCode.trim() || undefined,
+      shadeName: shadeName.trim() || undefined,
       quantity: qty,
       unitPrice: selectedOption.retailPrice,
       discountPercent: Number(discountPercent) || 0,
@@ -159,18 +203,35 @@ function PaintPickerPanel({ onAdd }: { onAdd: (line: DraftLine) => void }) {
             </div>
             <div>
               <label className="label">Quantity</label>
-              <input type="number" min="0.01" step="0.01" className="input" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+              <QuantityStepper value={quantity} onChange={setQuantity} />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div>
+              <label className="label">Shade Code (optional)</label>
+              <input className="input" placeholder="e.g. 7015" value={shadeCode} onChange={(e) => setShadeCode(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Shade Name (optional)</label>
+              <input className="input" placeholder="e.g. Vivid Blue" value={shadeName} onChange={(e) => setShadeName(e.target.value)} />
+            </div>
+            <div>
               <label className="label">Discount %</label>
-              <input type="number" min="0" max="100" step="0.01" className="input" value={discountPercent} onChange={(e) => setDiscountPercent(e.target.value)} />
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                max="100"
+                step="0.01"
+                className="input"
+                value={discountPercent}
+                onChange={(e) => setDiscountPercent(e.target.value)}
+              />
             </div>
           </div>
 
-          <button type="button" onClick={handleAdd} className="btn-primary">
+          <button type="button" onClick={handleAdd} className="btn-primary w-full sm:w-auto">
             <Plus className="h-4 w-4" /> Add to Invoice
           </button>
         </div>
@@ -266,18 +327,27 @@ function AccessoryPickerPanel({ onAdd }: { onAdd: (line: DraftLine) => void }) {
             </div>
             <div>
               <label className="label">Quantity</label>
-              <input type="number" min="0.01" step="0.01" className="input" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+              <QuantityStepper value={quantity} onChange={setQuantity} />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div>
               <label className="label">Discount %</label>
-              <input type="number" min="0" max="100" step="0.01" className="input" value={discountPercent} onChange={(e) => setDiscountPercent(e.target.value)} />
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                max="100"
+                step="0.01"
+                className="input"
+                value={discountPercent}
+                onChange={(e) => setDiscountPercent(e.target.value)}
+              />
             </div>
           </div>
 
-          <button type="button" onClick={handleAdd} className="btn-primary">
+          <button type="button" onClick={handleAdd} className="btn-primary w-full sm:w-auto">
             <Plus className="h-4 w-4" /> Add to Invoice
           </button>
         </div>
@@ -468,83 +538,173 @@ function NewInvoiceForm() {
         </div>
 
         {lines.length > 0 && (
-          <div className="overflow-x-auto rounded-lg border border-ink-100 dark:border-ink-800">
-            <table className="w-full text-left text-xs">
-              <thead className="border-b border-ink-100 bg-ink-50 uppercase tracking-wide text-ink-400 dark:border-ink-800 dark:bg-ink-800">
-                <tr>
-                  <th className="px-3 py-2">Product</th>
-                  <th className="px-3 py-2">Series</th>
-                  <th className="px-3 py-2">Packaging</th>
-                  <th className="px-3 py-2 text-right">Qty</th>
-                  <th className="px-3 py-2 text-right">Retail Price</th>
-                  <th className="px-3 py-2 text-right">Disc. %</th>
-                  <th className="px-3 py-2 text-right">GST %</th>
-                  <th className="px-3 py-2 text-right">Line Total</th>
-                  <th className="px-3 py-2"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
-                {lines.map((l) => (
-                  <tr key={l.rowId}>
-                    <td className="px-3 py-2">
-                      <p className="font-medium">{l.productName}</p>
-                      <p className="text-ink-400">{l.company}</p>
-                    </td>
-                    <td className="px-3 py-2">{l.series || "—"}</td>
-                    <td className="px-3 py-2">{l.packing || "—"}</td>
-                    <td className="px-2 py-1.5">
+          <>
+            {/* Mobile: one card per line item, touch-friendly controls. */}
+            <div className="space-y-3 sm:hidden">
+              {lines.map((l) => (
+                <div key={l.rowId} className="rounded-lg border border-ink-100 bg-ink-50 p-4 dark:border-ink-800 dark:bg-ink-800">
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      {l.series && <p className="text-xs text-ink-500 dark:text-ink-400">{l.series}</p>}
+                      <p className="truncate font-medium">{l.productName}</p>
+                      {(l.shadeCode || l.shadeName) && (
+                        <p className="text-xs text-ink-500 dark:text-ink-400">
+                          {l.shadeCode ? `Shade Code: ${l.shadeCode}` : ""}
+                          {l.shadeCode && l.shadeName ? " · " : ""}
+                          {l.shadeName ? `Shade: ${l.shadeName}` : ""}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeLine(l.rowId)}
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-swatch-clay hover:bg-swatch-clay/10"
+                      aria-label="Remove item"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="label !mb-1">Packing</p>
+                      <p className="text-sm font-medium">{l.packing || "—"}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="label !mb-1">Retail Price</p>
+                      <p className="text-sm font-medium">{money(l.unitPrice, currency)}</p>
+                    </div>
+                  </div>
+
+                  <div className="mb-3">
+                    <p className="label !mb-1">Quantity</p>
+                    <QuantityStepper value={String(l.quantity)} onChange={(v) => updateLine(l.rowId, { quantity: Number(v) || 0 })} />
+                  </div>
+
+                  <div className="mb-3 grid grid-cols-2 gap-3">
+                    <div>
+                      <p className="label !mb-1">Discount %</p>
                       <input
                         type="number"
-                        min="0.01"
-                        step="0.01"
-                        className="input w-20 px-2 py-1 text-right text-xs"
-                        value={l.quantity}
-                        onChange={(e) => updateLine(l.rowId, { quantity: Number(e.target.value) || 0 })}
-                      />
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        className="input w-24 px-2 py-1 text-right text-xs"
-                        value={l.unitPrice}
-                        onChange={(e) => updateLine(l.rowId, { unitPrice: Number(e.target.value) || 0 })}
-                      />
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <input
-                        type="number"
+                        inputMode="decimal"
                         min="0"
                         max="100"
                         step="0.01"
-                        className="input w-16 px-2 py-1 text-right text-xs"
+                        className="input"
                         value={l.discountPercent}
                         onChange={(e) => updateLine(l.rowId, { discountPercent: Number(e.target.value) || 0 })}
                       />
-                    </td>
-                    <td className="px-2 py-1.5">
+                    </div>
+                    <div>
+                      <p className="label !mb-1">GST %</p>
                       <input
                         type="number"
+                        inputMode="decimal"
                         min="0"
                         max="100"
                         step="0.01"
-                        className="input w-16 px-2 py-1 text-right text-xs"
+                        className="input"
                         value={l.gstPercent}
                         onChange={(e) => updateLine(l.rowId, { gstPercent: Number(e.target.value) || 0 })}
                       />
-                    </td>
-                    <td className="px-3 py-2 text-right font-medium">{money(l.lineTotal, currency)}</td>
-                    <td className="px-2 py-1.5 text-right">
-                      <button type="button" onClick={() => removeLine(l.rowId)} className="text-swatch-clay hover:underline">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </td>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between border-t border-ink-200 pt-3 dark:border-ink-700">
+                    <span className="text-sm text-ink-500 dark:text-ink-400">Amount</span>
+                    <span className="text-base font-semibold">{money(l.lineTotal, currency)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop / tablet: dense table. */}
+            <div className="hidden overflow-x-auto rounded-lg border border-ink-100 dark:border-ink-800 sm:block">
+              <table className="w-full text-left text-xs">
+                <thead className="border-b border-ink-100 bg-ink-50 uppercase tracking-wide text-ink-400 dark:border-ink-800 dark:bg-ink-800">
+                  <tr>
+                    <th className="px-3 py-2">Product</th>
+                    <th className="px-3 py-2">Series</th>
+                    <th className="px-3 py-2">Packaging</th>
+                    <th className="px-3 py-2 text-right">Qty</th>
+                    <th className="px-3 py-2 text-right">Retail Price</th>
+                    <th className="px-3 py-2 text-right">Disc. %</th>
+                    <th className="px-3 py-2 text-right">GST %</th>
+                    <th className="px-3 py-2 text-right">Line Total</th>
+                    <th className="px-3 py-2"></th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
+                  {lines.map((l) => (
+                    <tr key={l.rowId}>
+                      <td className="px-3 py-2">
+                        <p className="font-medium">{l.productName}</p>
+                        <p className="text-ink-400">
+                          {l.company}
+                          {(l.shadeCode || l.shadeName) && (
+                            <>
+                              {l.company ? " · " : ""}
+                              {[l.shadeCode, l.shadeName].filter(Boolean).join(" ")}
+                            </>
+                          )}
+                        </p>
+                      </td>
+                      <td className="px-3 py-2">{l.series || "—"}</td>
+                      <td className="px-3 py-2">{l.packing || "—"}</td>
+                      <td className="px-2 py-1.5">
+                        <input
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          className="input w-20 px-2 py-1 text-right text-xs"
+                          value={l.quantity}
+                          onChange={(e) => updateLine(l.rowId, { quantity: Number(e.target.value) || 0 })}
+                        />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          className="input w-24 px-2 py-1 text-right text-xs"
+                          value={l.unitPrice}
+                          onChange={(e) => updateLine(l.rowId, { unitPrice: Number(e.target.value) || 0 })}
+                        />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.01"
+                          className="input w-16 px-2 py-1 text-right text-xs"
+                          value={l.discountPercent}
+                          onChange={(e) => updateLine(l.rowId, { discountPercent: Number(e.target.value) || 0 })}
+                        />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.01"
+                          className="input w-16 px-2 py-1 text-right text-xs"
+                          value={l.gstPercent}
+                          onChange={(e) => updateLine(l.rowId, { gstPercent: Number(e.target.value) || 0 })}
+                        />
+                      </td>
+                      <td className="px-3 py-2 text-right font-medium">{money(l.lineTotal, currency)}</td>
+                      <td className="px-2 py-1.5 text-right">
+                        <button type="button" onClick={() => removeLine(l.rowId)} className="text-swatch-clay hover:underline">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
         {lines.length === 0 && <p className="text-sm text-ink-400">Search a product above, choose its packaging, then add it as a line item.</p>}
       </div>
@@ -561,6 +721,7 @@ function NewInvoiceForm() {
               <label className="label">WHT %</label>
               <input
                 type="number"
+                inputMode="decimal"
                 min="0"
                 max="100"
                 step="0.01"
@@ -587,6 +748,10 @@ function NewInvoiceForm() {
             <span>- {money(totals.discountTotal, currency)}</span>
           </div>
           <div className="flex justify-between text-sm">
+            <span className="text-ink-500 dark:text-ink-400">After Discount</span>
+            <span>{money(totals.valueAfterDiscount, currency)}</span>
+          </div>
+          <div className="flex justify-between text-sm">
             <span className="text-ink-500 dark:text-ink-400">GST</span>
             <span>{money(totals.gstTotal, currency)}</span>
           </div>
@@ -596,14 +761,14 @@ function NewInvoiceForm() {
               <span>- {money(totals.whtAmount, currency)}</span>
             </div>
           )}
-          <div className="flex justify-between border-t border-ink-100 pt-2 text-base font-semibold dark:border-ink-800">
-            <span>Grand Total</span>
-            <span>{money(totals.grandTotal, currency)}</span>
+          <div className="flex justify-between border-t border-ink-100 pt-2 text-lg font-semibold dark:border-ink-800">
+            <span>GRAND TOTAL</span>
+            <span className="text-brand-600 dark:text-brand-300">{money(totals.grandTotal, currency)}</span>
           </div>
 
-          <button onClick={handleGenerate} disabled={saving} className="btn-primary mt-4 w-full">
+          <button onClick={handleGenerate} disabled={saving} className="btn-primary mt-4 w-full py-3 text-base">
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            Generate Invoice
+            {saving ? "Saving Invoice…" : "Save Invoice"}
           </button>
         </div>
       </div>

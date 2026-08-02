@@ -72,6 +72,10 @@ export interface InvoiceLineItem {
   category: string;
   series: string;
   packing: string;
+  /** Optional, Paint-only: an in-house shade/color reference the staff can note against a
+   *  line item at invoice time. Never required, never stored on the Product itself. */
+  shadeCode?: string;
+  shadeName?: string;
   quantity: number;
   unitPrice: number;
   discountPercent: number;

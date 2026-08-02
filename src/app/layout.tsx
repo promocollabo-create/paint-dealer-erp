@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 import { ThemeProvider } from "@/context/ThemeContext";
@@ -9,6 +9,14 @@ import { Toaster } from "react-hot-toast";
 export const metadata: Metadata = {
   title: "Paint Dealer ERP",
   description: "Smart Invoice & ERP platform for paint dealers"
+};
+
+// Explicit responsive viewport: Android phones, iPhone, tablets, and desktop all render at
+// their real device width instead of a desktop-simulated layout.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

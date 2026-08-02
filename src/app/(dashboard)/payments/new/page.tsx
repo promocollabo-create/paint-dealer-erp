@@ -208,7 +208,7 @@ function NewPaymentForm() {
 
         <div className="card space-y-4">
           <h2 className="font-display text-base font-semibold">Payment Details</h2>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="label">Previous Balance</label>
               <input className="input bg-ink-50 dark:bg-ink-800" disabled value={money(previousBalance, currency)} />
@@ -233,7 +233,7 @@ function NewPaymentForm() {
               value={money(remainingBalance, currency)}
             />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="label">Payment Method</label>
               <select className="input" value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>

@@ -110,8 +110,8 @@ function CustomerModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/50 p-4">
-      <div className="card w-full max-w-lg">
+    <div className="modal-overlay">
+      <div className="modal-panel sm:max-w-lg">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-display text-base font-semibold">{editing ? "Edit Customer" : "Add Customer"}</h2>
           <button onClick={onClose} className="text-ink-400 hover:text-ink-600 dark:hover:text-ink-200">
@@ -128,7 +128,7 @@ function CustomerModal({
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
             />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="label">Phone</label>
               <input
@@ -283,7 +283,59 @@ function CustomersContent() {
         </button>
       </div>
 
-      <div className="card overflow-x-auto p-0">
+      {/* Mobile: card list (Customer Name, Phone, City, Outstanding). */}
+      <div className="space-y-3 sm:hidden">
+        {loading ? (
+          <div className="card flex justify-center py-10 text-ink-400">
+            <Loader2 className="h-5 w-5 animate-spin" />
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="card py-10 text-center text-sm text-ink-400">
+            {search ? "No customers match your search." : "No customers yet — add your first one."}
+          </div>
+        ) : (
+          filtered.map((c) => (
+            <div key={c.id} className="card space-y-2 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{c.name}</p>
+                  <p className="text-xs text-ink-500 dark:text-ink-400">{c.phone}</p>
+                </div>
+                <p className={`shrink-0 text-right text-sm font-medium ${c.outstanding > 0 ? "text-swatch-clay" : "text-swatch-moss"}`}>
+                  {money(c.outstanding)}
+                </p>
+              </div>
+              <p className="text-xs text-ink-500 dark:text-ink-400">{c.city || "—"}</p>
+              <div className="flex items-center justify-end gap-4 border-t border-ink-100 pt-2 dark:border-ink-800">
+                <Link href={`/customers/${c.id}/ledger`} className="text-sm font-medium text-brand-600 hover:underline">
+                  Ledger
+                </Link>
+                <button
+                  onClick={() => {
+                    setEditing(c);
+                    setModalOpen(true);
+                  }}
+                  className="text-sm font-medium text-brand-600 hover:underline"
+                >
+                  Edit
+                </button>
+                {hasPermission(appUser?.role, "customers.manage") && (
+                  <button
+                    onClick={() => handleDelete(c)}
+                    disabled={deletingId === c.id}
+                    className="flex items-center gap-1 text-sm font-medium text-swatch-clay disabled:opacity-50"
+                  >
+                    {deletingId === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Delete
+                  </button>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Desktop / tablet: table. */}
+      <div className="hidden overflow-x-auto rounded-xl2 border border-ink-200 bg-white shadow-card dark:border-ink-700 dark:bg-ink-900 sm:block">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-ink-100 text-xs uppercase tracking-wide text-ink-400 dark:border-ink-800">
             <tr>

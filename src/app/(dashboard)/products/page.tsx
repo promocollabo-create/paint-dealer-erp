@@ -91,7 +91,84 @@ function PaintProductsTab() {
         Showing the 50 most recently updated Paint products. Use search above to find anything in the full catalog.
       </p>
 
-      <div className="card overflow-x-auto p-0">
+      {/* Mobile: card list (Series, Product Name, Available Packings, Retail Prices, GST, Status). */}
+      <div className="space-y-3 sm:hidden">
+        {loading ? (
+          <div className="card flex justify-center py-10 text-ink-400">
+            <Loader2 className="h-5 w-5 animate-spin" />
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="card py-10 text-center text-sm text-ink-400">No Paint products match these filters yet.</div>
+        ) : (
+          filtered.map((p) => (
+            <div key={p.id} className="card space-y-2 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs text-ink-500 dark:text-ink-400">{p.series || "—"}</p>
+                  <p className="truncate font-medium">{p.productName}</p>
+                  <p className="text-xs text-ink-500 dark:text-ink-400">{p.company || "—"}</p>
+                </div>
+                <span
+                  className={`badge shrink-0 ${
+                    p.status === "active" ? "bg-swatch-moss/10 text-swatch-moss" : "bg-ink-100 text-ink-500 dark:bg-ink-700"
+                  }`}
+                >
+                  {p.status}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs text-ink-500 dark:text-ink-400">
+                <div>
+                  <p className="text-ink-400">Packing</p>
+                  <p className="text-ink-700 dark:text-ink-200">
+                    {p.packagingOptions.length > 0 ? p.packagingOptions.map((o) => o.packing).join(", ") : "—"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-ink-400">Retail Price</p>
+                  <p className="text-ink-700 dark:text-ink-200">
+                    {p.packagingOptions.length > 0
+                      ? p.packagingOptions.length === 1
+                        ? money(p.packagingOptions[0].retailPrice)
+                        : `${money(Math.min(...p.packagingOptions.map((o) => o.retailPrice)))} – ${money(
+                            Math.max(...p.packagingOptions.map((o) => o.retailPrice))
+                          )}`
+                      : "—"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-ink-400">GST</p>
+                  <p className="text-ink-700 dark:text-ink-200">
+                    {p.packagingOptions.length > 0
+                      ? Array.from(new Set(p.packagingOptions.map((o) => `${o.gst}%`))).join(", ")
+                      : "—"}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-4 border-t border-ink-100 pt-2 dark:border-ink-800">
+                <button
+                  onClick={() => {
+                    setEditing(p);
+                    setModalOpen(true);
+                  }}
+                  className="text-sm font-medium text-brand-600 hover:underline"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => handleDelete(p)}
+                  disabled={deletingId === p.id}
+                  className="flex items-center gap-1 text-sm font-medium text-swatch-clay disabled:opacity-50"
+                >
+                  {deletingId === p.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Delete
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Desktop / tablet: table. */}
+      <div className="hidden overflow-x-auto rounded-xl2 border border-ink-200 bg-white shadow-card dark:border-ink-700 dark:bg-ink-900 sm:block">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-ink-100 text-xs uppercase tracking-wide text-ink-400 dark:border-ink-800">
             <tr>
@@ -256,7 +333,70 @@ function PaintAccessoriesTab() {
         Showing the 50 most recently updated Accessory sections. GST for accessories is entered manually on each invoice line.
       </p>
 
-      <div className="card overflow-x-auto p-0">
+      {/* Mobile: card list. */}
+      <div className="space-y-3 sm:hidden">
+        {loading ? (
+          <div className="card flex justify-center py-10 text-ink-400">
+            <Loader2 className="h-5 w-5 animate-spin" />
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="card py-10 text-center text-sm text-ink-400">No Accessory sections match these filters yet.</div>
+        ) : (
+          filtered.map((s) => (
+            <div key={s.id} className="card space-y-2 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <p className="font-medium">{s.sectionName}</p>
+                <span
+                  className={`badge shrink-0 ${
+                    s.status === "active" ? "bg-swatch-moss/10 text-swatch-moss" : "bg-ink-100 text-ink-500 dark:bg-ink-700"
+                  }`}
+                >
+                  {s.status}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs text-ink-500 dark:text-ink-400">
+                <div>
+                  <p className="text-ink-400">Type / Size</p>
+                  <p className="text-ink-700 dark:text-ink-200">{s.variants.length > 0 ? s.variants.map((v) => v.name).join(", ") : "—"}</p>
+                </div>
+                <div>
+                  <p className="text-ink-400">Retail Price</p>
+                  <p className="text-ink-700 dark:text-ink-200">
+                    {s.variants.length > 0
+                      ? s.variants.length === 1
+                        ? money(s.variants[0].retailPrice)
+                        : `${money(Math.min(...s.variants.map((v) => v.retailPrice)))} – ${money(
+                            Math.max(...s.variants.map((v) => v.retailPrice))
+                          )}`
+                      : "—"}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-4 border-t border-ink-100 pt-2 dark:border-ink-800">
+                <button
+                  onClick={() => {
+                    setEditing(s);
+                    setModalOpen(true);
+                  }}
+                  className="text-sm font-medium text-brand-600 hover:underline"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => handleDelete(s)}
+                  disabled={deletingId === s.id}
+                  className="flex items-center gap-1 text-sm font-medium text-swatch-clay disabled:opacity-50"
+                >
+                  {deletingId === s.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Delete
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Desktop / tablet: table. */}
+      <div className="hidden overflow-x-auto rounded-xl2 border border-ink-200 bg-white shadow-card dark:border-ink-700 dark:bg-ink-900 sm:block">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-ink-100 text-xs uppercase tracking-wide text-ink-400 dark:border-ink-800">
             <tr>

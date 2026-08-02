@@ -157,8 +157,8 @@ export default function ProductFormModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/50 p-4">
-      <div className="card max-h-[90vh] w-full max-w-2xl overflow-y-auto">
+    <div className="modal-overlay">
+      <div className="modal-panel sm:max-w-2xl">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-display text-base font-semibold">{editing ? "Edit Paint Product" : "Add Paint Product"}</h2>
           <button onClick={onClose} className="text-ink-400 hover:text-ink-600 dark:hover:text-ink-200">
@@ -191,7 +191,7 @@ export default function ProductFormModal({
             </div>
             <div className="space-y-2">
               {packagingRows.map((row) => (
-                <div key={row.id} className="grid grid-cols-[1fr_1fr_0.7fr_auto] items-end gap-2">
+                <div key={row.id} className="grid grid-cols-2 items-end gap-2 sm:grid-cols-[1fr_1fr_0.7fr_auto]">
                   <div>
                     <label className="label">Packaging</label>
                     <input

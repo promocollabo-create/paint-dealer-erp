@@ -6,9 +6,9 @@ import { LayoutDashboard, Users, Settings, PaintBucket, KeyRound, PackageSearch,
 import { useAuth } from "@/context/AuthContext";
 import { hasPermission } from "@/types";
 
-const SWATCHES = ["#C1552E", "#D9A441", "#4C7B5A", "#2E7D8C", "#6C4E8C"];
+export const SWATCHES = ["#C1552E", "#D9A441", "#4C7B5A", "#2E7D8C", "#6C4E8C"];
 
-const NAV_ITEMS = [
+export const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, permission: "dashboard.view" },
   { href: "/products", label: "Products", icon: PackageSearch, permission: "products.manage" },
   { href: "/customers", label: "Customers", icon: Users, permission: "customers.manage" },
