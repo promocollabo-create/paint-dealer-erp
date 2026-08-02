@@ -12,6 +12,25 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
 };
 
+/** Reports exactly which required NEXT_PUBLIC_FIREBASE_* env vars weren't baked into this
+ *  build, instead of letting Firebase fail later with an opaque error (e.g. `storage/unknown`,
+ *  `auth/invalid-api-key`). NEXT_PUBLIC_ vars are inlined at BUILD time, so this reflects what
+ *  `next build` actually had available — a var only added to `.env.local` after building (or
+ *  missing on the host that ran the build) will show up here as missing. */
+export function getMissingFirebaseEnvVars(): string[] {
+  const required: Record<string, string | undefined> = {
+    NEXT_PUBLIC_FIREBASE_API_KEY: firebaseConfig.apiKey,
+    NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: firebaseConfig.authDomain,
+    NEXT_PUBLIC_FIREBASE_PROJECT_ID: firebaseConfig.projectId,
+    NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: firebaseConfig.storageBucket,
+    NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: firebaseConfig.messagingSenderId,
+    NEXT_PUBLIC_FIREBASE_APP_ID: firebaseConfig.appId
+  };
+  return Object.entries(required)
+    .filter(([, value]) => !value)
+    .map(([key]) => key);
+}
+
 let appInstance: FirebaseApp | undefined;
 let authInstance: Auth | undefined;
 let dbInstance: Firestore | undefined;

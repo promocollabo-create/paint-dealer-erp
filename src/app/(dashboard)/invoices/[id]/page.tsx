@@ -127,13 +127,23 @@ function InvoiceDetailContent() {
 
       <div className="card space-y-6">
         <div className="flex flex-wrap items-start justify-between gap-4 border-b border-ink-100 pb-4 dark:border-ink-800">
-          <div>
-            <p className="font-display text-lg font-semibold">{shop.shopName}</p>
-            {shop.address && <p className="text-sm text-ink-500 dark:text-ink-400">{shop.address}</p>}
-            <p className="text-sm text-ink-500 dark:text-ink-400">
-              {[shop.phone, shop.email].filter(Boolean).join(" · ")}
-            </p>
-            {shop.ntnStrn && <p className="text-xs text-ink-400">NTN/STRN: {shop.ntnStrn}</p>}
+          <div className="flex items-start gap-3">
+            {shop.logoUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={shop.logoUrl}
+                alt={`${shop.shopName || "Shop"} logo`}
+                className="h-12 w-12 shrink-0 rounded-lg border border-ink-100 object-contain dark:border-ink-800"
+              />
+            )}
+            <div>
+              <p className="font-display text-lg font-semibold">{shop.shopName}</p>
+              {shop.address && <p className="text-sm text-ink-500 dark:text-ink-400">{shop.address}</p>}
+              <p className="text-sm text-ink-500 dark:text-ink-400">
+                {[shop.phone, shop.email].filter(Boolean).join(" · ")}
+              </p>
+              {shop.ntnStrn && <p className="text-xs text-ink-400">NTN/STRN: {shop.ntnStrn}</p>}
+            </div>
           </div>
           <div className="text-right">
             <span className={`badge ${STATUS_STYLES[invoice.status]} mb-2 inline-block capitalize`}>{invoice.status}</span>

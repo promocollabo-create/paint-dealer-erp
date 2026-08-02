@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { Loader2, Upload } from "lucide-react";
-import { db, storage } from "@/lib/firebase";
+import { db, storage, getMissingFirebaseEnvVars } from "@/lib/firebase";
 import Topbar from "@/components/layout/Topbar";
 import toast from "react-hot-toast";
 
@@ -21,11 +21,21 @@ const EMPTY_SETTINGS = {
   currency: "PKR"
 };
 
+// Accepted logo formats — kept in one place so the <input accept="..."> attribute and the
+// actual runtime validation (accept is only a hint; browsers don't enforce it) always agree.
+const ACCEPTED_LOGO_TYPES: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp"
+};
+const MAX_LOGO_BYTES = 2 * 1024 * 1024;
+
 function SettingsForm() {
   const [form, setForm] = useState(EMPTY_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   useEffect(() => {
     async function load() {
@@ -49,23 +59,90 @@ function SettingsForm() {
 
   async function handleLogoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    // Always clear the input value so selecting the exact same file again still fires onChange.
+    e.target.value = "";
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) {
+
+    // 1. Fail fast, with a specific message, if the build is missing Firebase config —
+    //    this is the #1 cause of uploads silently going nowhere.
+    const missingVars = getMissingFirebaseEnvVars();
+    if (missingVars.length > 0) {
+      toast.error(`Firebase isn't configured: missing ${missingVars.join(", ")}. Set these and rebuild/redeploy.`);
+      console.error("Logo upload aborted — missing Firebase env vars:", missingVars);
+      return;
+    }
+    if (!storage) {
+      toast.error("Firebase Storage failed to initialize. Check the browser console for details.");
+      return;
+    }
+
+    // 2. Validate type against the real MIME type (accept="" on the input is only a hint —
+    //    browsers/file pickers don't actually enforce it).
+    const extension = ACCEPTED_LOGO_TYPES[file.type];
+    if (!extension) {
+      toast.error("Logo must be a PNG, JPG/JPEG, or WEBP image.");
+      return;
+    }
+    if (file.size > MAX_LOGO_BYTES) {
       toast.error("Logo must be under 2MB.");
       return;
     }
+
     setUploading(true);
+    setUploadProgress(0);
     try {
-      const storageRef = ref(storage, `shop/logo-${Date.now()}-${file.name}`);
-      await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
+      // Suggested path from the spec: shop-settings/logo/current-logo-{timestamp}.{extension}
+      const storagePath = `shop-settings/logo/current-logo-${Date.now()}.${extension}`;
+      const storageRef = ref(storage, storagePath);
+      const task = uploadBytesResumable(storageRef, file, { contentType: file.type });
+
+      const url = await new Promise<string>((resolve, reject) => {
+        task.on(
+          "state_changed",
+          (snapshot) => {
+            setUploadProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100));
+          },
+          (error) => reject(error),
+          async () => {
+            try {
+              resolve(await getDownloadURL(task.snapshot.ref));
+            } catch (err) {
+              reject(err);
+            }
+          }
+        );
+      });
+
+      // Update the form immediately for preview...
       update("logoUrl", url);
-      toast.success("Logo uploaded — remember to save.");
-    } catch (err) {
-      console.error(err);
-      toast.error("Logo upload failed.");
+
+      // ...and ALSO persist it to Firestore right away (merge, not the whole form) so the
+      // logo survives a refresh/logout/new device even if the admin never presses
+      // "Save Settings" afterward. This was the actual bug: previously the upload only
+      // updated local React state, so navigating away or refreshing before clicking Save
+      // silently discarded the uploaded logo even though the file WAS in Storage.
+      await setDoc(doc(db, "settings", "shop"), { logoUrl: url, updatedAt: serverTimestamp() }, { merge: true });
+
+      toast.success("Logo uploaded and saved.");
+    } catch (err: any) {
+      // Surface the real Firebase error code/message instead of a generic failure — needed
+      // to tell apart storage/unauthorized (rules), storage/bucket-not-found (bad env var),
+      // storage/unknown (network/CORS), etc.
+      const code = err?.code ?? "unknown";
+      const message = err?.message ?? String(err);
+      console.error("Logo upload failed:", code, message, err);
+      if (code === "storage/unauthorized") {
+        toast.error("Upload blocked by Storage rules (storage/unauthorized) — your account may not have the admin role.");
+      } else if (code === "storage/bucket-not-found" || code === "storage/project-not-found") {
+        toast.error(`Upload failed: ${code}. Check NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET matches your Firebase project.`);
+      } else if (code === "storage/canceled") {
+        toast.error("Upload canceled.");
+      } else {
+        toast.error(`Logo upload failed: ${code} — ${message}`);
+      }
     } finally {
       setUploading(false);
+      setUploadProgress(0);
     }
   }
 
@@ -73,7 +150,7 @@ function SettingsForm() {
     e.preventDefault();
     setSaving(true);
     try {
-      await setDoc(doc(db, "settings", "shop"), { ...form, updatedAt: serverTimestamp() });
+      await setDoc(doc(db, "settings", "shop"), { ...form, updatedAt: serverTimestamp() }, { merge: true });
       toast.success("Shop settings saved");
     } catch (err) {
       console.error(err);
@@ -111,11 +188,20 @@ function SettingsForm() {
                   <Upload className="h-5 w-5 text-ink-400" />
                 )}
               </div>
-              <label className="btn-secondary cursor-pointer">
-                {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                {uploading ? "Uploading…" : "Upload logo"}
-                <input type="file" accept="image/*" className="hidden" onChange={handleLogoChange} disabled={uploading} />
-              </label>
+              <div>
+                <label className="btn-secondary cursor-pointer">
+                  {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  {uploading ? `Uploading… ${uploadProgress}%` : "Upload logo"}
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="hidden"
+                    onChange={handleLogoChange}
+                    disabled={uploading}
+                  />
+                </label>
+                <p className="mt-1 text-xs text-ink-400">PNG, JPG, or WEBP · up to 2MB</p>
+              </div>
             </div>
           </div>
 
